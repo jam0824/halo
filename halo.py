@@ -63,6 +63,7 @@ def main():
     )
 
     system_content = replace_placeholders(system_content, owner_name, your_name)
+    print(system_content)
     history = ""
 
     try:
