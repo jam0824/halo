@@ -58,7 +58,7 @@ class SpeechToText:
             voice_activity_timeout=cs.StreamingRecognitionFeatures.VoiceActivityTimeout(
                 # 必要なら調整: 開始待ち/終了判定の猶予
                 speech_start_timeout=duration_pb2.Duration(seconds=5, nanos=0),
-                speech_end_timeout=duration_pb2.Duration(seconds=0, nanos=800_000_000),
+                speech_end_timeout=duration_pb2.Duration(seconds=0, nanos=500_000_000),
             ),
         )
         self._streaming_config = cs.StreamingRecognitionConfig(
