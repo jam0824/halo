@@ -166,6 +166,7 @@ def replace_placeholders(text: str, owner_name: str, your_name: str) -> str:
     return text
 
 def apply_text_changes(text: str, change_text_config: dict) -> str:
+    """テキスト内に変更対象の文字列があったら、それを変更対象の文字列に置き換えて返すメソッド"""
     if not change_text_config:
         return text
     
