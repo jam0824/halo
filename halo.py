@@ -37,30 +37,31 @@ def get_default_config() -> dict:
     }
 
 def main():
-    # 設定ファイルを読み込み
     config = load_config()
-    
-    # 設定から値を取得
     system_content = config["system_content"]
     owner_name = config["owner_name"]
     your_name = config["your_name"]
     tts_config = config["voiceVoxTTS"]
-    
-    # LLM/STT/TTS のインスタンス作成（TTSは一度だけ）
+
     llm = LLM()
-    stt = SpeechToText()
+    stt = SpeechToText()        # ← インスタンスは使い回す
     tts = VoiceVoxTTS(
         base_url=tts_config["base_url"],
         speaker=tts_config["speaker"],
         max_len=tts_config["max_len"],
         queue_size=tts_config["queue_size"],
     )
-    # 声質調整（設定ファイルから）
     tts.set_params(
         speedScale=tts_config["speedScale"], 
         pitchScale=tts_config["pitchScale"], 
         intonationScale=tts_config["intonationScale"]
     )
+
+    # ★ 初回ターンも速くしたい場合はプリウォーム（任意）
+    try:
+        stt.warm_up()
+    except Exception as e:
+        print(f"STT warm_up でエラー: {e}")
 
     system_content = replace_placeholders(system_content, owner_name, your_name)
     print(system_content)
@@ -73,31 +74,29 @@ def main():
             print(f"\n=== ループ {loop_count} 開始 ===")
 
             try:
-                user_text = exec_stt(stt)
+                user_text = exec_stt(stt)   # ← listen_once() は内部で「一時停止」までやる
             except KeyboardInterrupt:
                 print("\n\n音声認識中に中断されました。")
                 break
-            
+
             if not user_text:
                 print("音声が認識されませんでした。もう一度話してください")
                 continue
+
             owner_text = f"{owner_name}: {user_text}"
             history += owner_text + "\n"
             print(owner_text)
             stt_end_time = time.perf_counter()
 
-            # 終了コマンド
             if check_end_command(user_text):
                 farewell = "バイバイ！"
                 print(f"{your_name}: {farewell}")
-                # 口頭でもお別れを読み上げ
                 try:
                     tts.speak(farewell)
                 except Exception as e:
                     print(f"TTSでエラーが発生しました: {e}")
                 break
-            
-            # LLM応答生成
+
             print("LLMで応答を生成中...")
             try:
                 response = llm.generate_text(user_text, system_content, history)
@@ -107,24 +106,30 @@ def main():
                 print(your_text)
             except Exception as e:
                 print(f"LLMでエラーが発生しました: {e}")
-                continue  # エラーが発生してもループを続ける
-            
-           
+                continue
+
             llm_end_time = time.perf_counter()
             print(f"[LLM latency] {llm_end_time - stt_end_time:.1f} ms")
-             # 応答を読み上げ（同期、終わるまで待つ）
+
+            # 応答を読み上げ（この間は STT は一時停止状態）
             exec_tts(tts, response)
-            
+
             print(f"=== ループ {loop_count} 完了 ===")
-            
+
     except KeyboardInterrupt:
         print("\n\n会話を終了します。")
-        tts.stop()
+        try: tts.stop()
+        except: pass
     except Exception as e:
         print(f"\nエラーが発生しました: {e}")
         import traceback
         traceback.print_exc()
-        tts.stop()
+        try: tts.stop()
+        except: pass
+    finally:
+        # ★ プロセス終了時にだけ完全に解放
+        try: stt.close()
+        except: pass
 
 def exec_stt(stt: SpeechToText) -> str:
     # 音声認識
