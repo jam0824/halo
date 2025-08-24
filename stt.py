@@ -176,6 +176,7 @@ class SpeechToText:
         """
         print(f"[Listening] language={self.LANGUAGE}, model={self.MODEL}, location={self.LOCATION}  (発話してください)")
         start = time.time()
+        first_text_time = None
         try:
             responses = self.client.streaming_recognize(
                 requests=self._request_generator(),
@@ -187,8 +188,19 @@ class SpeechToText:
                         continue
                     alt = result.alternatives[0]
                     text = alt.transcript
+                    # 最初のテキストが出たら時間を記録
+                    if first_text_time is None and text and text.strip():
+                        first_text_time = time.perf_counter()
+                        
                     if getattr(result, "is_final", False):
+                        final_time = time.perf_counter()
                         print(text)
+
+                        # 最初の文字→確定までの時間を表示
+                        if first_text_time is not None:
+                            diff_ms = (final_time - first_text_time) * 1000.0
+                            print(f"[STT latency] first_char → is_final: {diff_ms:.1f} ms")
+                        
                         # 先に停止して、read解除→join→close の順へ
                         self._stop_event.set()
                         # 起きていない待ちを起こす
