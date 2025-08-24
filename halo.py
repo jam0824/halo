@@ -1,22 +1,63 @@
 # halo.py
+import json
 from llm import LLM
 from stt import SpeechToText
 from voicevox import VoiceVoxTTS  # ← 追加：クラスをインポート
 
+def load_config(config_path: str = "config.js") -> dict:
+    """設定ファイル（config.js）を読み込む"""
+    try:
+        with open(config_path, 'r', encoding='utf-8') as file:
+            config = json.load(file)
+        return config
+    except FileNotFoundError:
+        print(f"設定ファイル {config_path} が見つかりません。デフォルト設定を使用します。")
+        return get_default_config()
+    except json.JSONDecodeError as e:
+        print(f"設定ファイルの読み込みエラー: {e}。デフォルト設定を使用します。")
+        return get_default_config()
+
+def get_default_config() -> dict:
+    """デフォルト設定を返す"""
+    return {
+        "system_content": "これはユーザーであるみねおとあなた（ハロ）との会話です。ハロは片言で返します。（例）ハロ、わかった！",
+        "owner_name": "みねお",
+        "voiceVoxTTS": {
+            "base_url": "http://127.0.0.1:50021",
+            "speaker": 89,
+            "max_len": 80,
+            "queue_size": 4,
+            "speedScale": 1.0,
+            "pitchScale": 0.0,
+            "intonationScale": 1.0
+        }
+    }
+
 def main():
-    # システムプロンプト
-    system_content = "これはユーザーであるみねおとあなた（ハロ）との会話です。ハロは片言で返します。（例）ハロ、わかった！"
+    # 設定ファイルを読み込み
+    config = load_config()
+    
+    # 設定から値を取得
+    system_content = config["system_content"]
+    owner_name = config["owner_name"]
+    your_name = config["your_name"]
+    tts_config = config["voiceVoxTTS"]
     
     # LLM/STT/TTS のインスタンス作成（TTSは一度だけ）
     llm = LLM()
+    stt = SpeechToText()
     tts = VoiceVoxTTS(
-        base_url="http://127.0.0.1:50021",
-        speaker=89,     # 好きな話者IDに変更OK
-        max_len=80,
-        queue_size=4,
+        base_url=tts_config["base_url"],
+        speaker=tts_config["speaker"],
+        max_len=tts_config["max_len"],
+        queue_size=tts_config["queue_size"],
     )
-    # 好みの声質調整（任意）
-    tts.set_params(speedScale=1.0, pitchScale=0.0, intonationScale=1.0)
+    # 声質調整（設定ファイルから）
+    tts.set_params(
+        speedScale=tts_config["speedScale"], 
+        pitchScale=tts_config["pitchScale"], 
+        intonationScale=tts_config["intonationScale"]
+    )
 
     try:
         loop_count = 0
@@ -24,16 +65,16 @@ def main():
             loop_count += 1
             print(f"\n=== ループ {loop_count} 開始 ===")
 
-            user_text = exec_stt()
+            user_text = exec_stt(stt)
             if not user_text:
                 print("音声が認識されませんでした。もう一度話してください。")
                 continue
-            print(f"みねお: {user_text}")
+            print(f"{owner_name}: {user_text}")
             
             # 終了コマンド
             if check_end_command(user_text):
                 farewell = "バイバイ！"
-                print(f"ハロ: {farewell}")
+                print(f"{your_name}: {farewell}")
                 # 口頭でもお別れを読み上げ
                 try:
                     tts.speak(farewell)
@@ -45,7 +86,7 @@ def main():
             print("LLMで応答を生成中...")
             try:
                 response = llm.generate_text(user_text, system_content)
-                print(f"ハロ: {response}")
+                print(f"{your_name}: {response}")
             except Exception as e:
                 print(f"LLMでエラーが発生しました: {e}")
                 continue  # エラーが発生してもループを続ける
@@ -64,11 +105,10 @@ def main():
         traceback.print_exc()
         tts.stop()
 
-def exec_stt() -> str:
+def exec_stt(stt: SpeechToText) -> str:
     # 音声認識
     print("--- 音声入力待ち ---")
-    with SpeechToText() as stt:
-        user_text = stt.listen_once()
+    user_text = stt.listen_once()
     return user_text
 
 def check_end_command(user_text: str) -> bool:
