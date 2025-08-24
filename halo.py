@@ -61,6 +61,9 @@ def main():
         intonationScale=tts_config["intonationScale"]
     )
 
+    system_content = replace_placeholders(system_content, owner_name, your_name)
+    history = ""
+
     try:
         loop_count = 0
         while True:
@@ -76,8 +79,10 @@ def main():
             if not user_text:
                 print("音声が認識されませんでした。もう一度話してください")
                 continue
-            print(f"{owner_name}: {user_text}")
-            
+            owner_text = f"{owner_name}: {user_text}"
+            history += owner_text + "\n"
+            print(owner_text)
+
             # 終了コマンド
             if check_end_command(user_text):
                 farewell = "バイバイ！"
@@ -92,8 +97,11 @@ def main():
             # LLM応答生成
             print("LLMで応答を生成中...")
             try:
-                response = llm.generate_text(user_text, system_content)
-                print(f"{your_name}: {response}")
+                response = llm.generate_text(user_text, system_content, history)
+                response = response.replace(f"{your_name}:", "")
+                your_text = f"{your_name}: {response}"
+                history += your_text + "\n"
+                print(your_text)
             except Exception as e:
                 print(f"LLMでエラーが発生しました: {e}")
                 continue  # エラーが発生してもループを続ける
@@ -135,6 +143,11 @@ def exec_tts(tts: VoiceVoxTTS, text: str):
         print("\n読み上げを中断しました。")
     except Exception as e:
         print(f"TTSでエラーが発生しました: {e}")
+
+def replace_placeholders(text: str, owner_name: str, your_name: str) -> str:
+    text = text.replace("{owner_name}", owner_name)
+    text = text.replace("{your_name}", your_name)
+    return text
     
 
 if __name__ == "__main__":

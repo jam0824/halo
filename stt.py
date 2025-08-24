@@ -204,5 +204,8 @@ class SpeechToText:
                     # 任意の安全装置（長すぎるセッションは終了）
                     if time.time() - start > timeout_sec:
                         return ""
+        except KeyboardInterrupt:
+            print("\n音声認識を中断しました。")
+            return ""
         finally:
             self.close()
