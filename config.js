@@ -10,5 +10,8 @@
     "speedScale": 1.0,
     "pitchScale": 0.0,
     "intonationScale": 1.0
+  },
+  "change_text":{
+    "春": "ハロ"
   }
 }

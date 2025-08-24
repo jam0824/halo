@@ -25,6 +25,9 @@ def get_default_config() -> dict:
         "system_content": "これはユーザーである{owner_name}とあなた（{your_name}）との会話です。{your_name}は片言で返します。セリフは短すぎず、長すぎずです。話を盛り上げようとします。また{your_name}は自分の名前を呼びがちです。けれど同じセリフで2回は自分の名前を言いません。（例）{your_name}、わかった！",
         "owner_name": "まつ",
         "your_name": "ハロ",
+        "change_text": {
+            "春": "ハロ"
+        },
         "voiceVoxTTS": {
             "base_url": "http://127.0.0.1:50021",
             "speaker": 89,
@@ -42,6 +45,7 @@ def main():
     owner_name = config["owner_name"]
     your_name = config["your_name"]
     tts_config = config["voiceVoxTTS"]
+    change_name = config["change_text"]
 
     llm = LLM()
     stt = SpeechToText()        # ← インスタンスは使い回す
@@ -83,6 +87,7 @@ def main():
                 print("音声が認識されませんでした。もう一度話してください")
                 continue
 
+            user_text = apply_text_changes(user_text, change_name)
             owner_text = f"{owner_name}: {user_text}"
             history += owner_text + "\n"
             print(owner_text)
@@ -159,6 +164,17 @@ def replace_placeholders(text: str, owner_name: str, your_name: str) -> str:
     text = text.replace("{owner_name}", owner_name)
     text = text.replace("{your_name}", your_name)
     return text
+
+def apply_text_changes(text: str, change_text_config: dict) -> str:
+    if not change_text_config:
+        return text
+    
+    result = text
+    for key, value in change_text_config.items():
+        if key in result:
+            result = result.replace(key, value)
+    
+    return result
     
 
 if __name__ == "__main__":
