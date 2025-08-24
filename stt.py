@@ -245,7 +245,7 @@ class SpeechToText:
         """
         1回の発話を認識してテキストを返す（ターン間はホットスタンバイ）。
         """
-        print(f"[Listening] language={self.LANGUAGE}, model={self.MODEL}, location={self.LOCATION}  (発話してください)")
+        print(f"[Listening] language={self.LANGUAGE}, model={self.MODEL}, location={self.LOCATION} \n (発話してください)")
         start = time.time()
         first_text_time = None
         latest_text = ""
