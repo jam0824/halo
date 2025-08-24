@@ -6,8 +6,8 @@ from llm import LLM
 from stt import SpeechToText
 from voicevox import VoiceVoxTTS  # ← 追加：クラスをインポート
 
-def load_config(config_path: str = "config.js") -> dict:
-    """設定ファイル（config.js）を読み込む"""
+def load_config(config_path: str = "config.json") -> dict:
+    """設定ファイル（config.json）を読み込む"""
     try:
         with open(config_path, 'r', encoding='utf-8') as file:
             config = json.load(file)

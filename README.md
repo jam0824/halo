@@ -55,9 +55,9 @@ pip install openai google-cloud-speech pyaudio requests simpleaudio
 python halo.py
 ```
 
-### 設定ファイル（config.js）
+### 設定ファイル（config.json）
 
-プロジェクトルートに`config.js`を配置して、キャラクター設定をカスタマイズできます：
+プロジェクトルートに`config.json`を配置して、キャラクター設定をカスタマイズできます：
 
 ```json
 {
@@ -85,7 +85,7 @@ python halo.py
 ```
 halo/
 ├── halo.py              # メインアプリケーション
-├── config.js            # 設定ファイル
+├── config.json            # 設定ファイル
 ├── llm.py              # OpenAI GPT-4o-mini連携
 ├── stt.py              # Google Cloud Speech-to-Text連携
 ├── voicevox.py         # VOICEVOX TTS連携
@@ -158,7 +158,7 @@ python test_halo_oneshot.py
 - `location`: Google Cloudリージョン（デフォルト: "asia-northeast1"）
 
 ### 音声合成設定
-`config.js`の`voiceVoxTTS`セクションで調整：
+`config.json`の`voiceVoxTTS`セクションで調整：
 - `speaker`: 話者ID
 - `speedScale`: 話速（1.0が標準）
 - `pitchScale`: ピッチ（0.0が標準）
