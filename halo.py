@@ -1,5 +1,6 @@
 # halo.py
 import json
+import sys
 from llm import LLM
 from stt import SpeechToText
 from voicevox import VoiceVoxTTS  # ← 追加：クラスをインポート
@@ -22,6 +23,7 @@ def get_default_config() -> dict:
     return {
         "system_content": "これはユーザーであるみねおとあなた（ハロ）との会話です。ハロは片言で返します。（例）ハロ、わかった！",
         "owner_name": "みねお",
+        "your_name": "ハロ",
         "voiceVoxTTS": {
             "base_url": "http://127.0.0.1:50021",
             "speaker": 89,
@@ -65,9 +67,14 @@ def main():
             loop_count += 1
             print(f"\n=== ループ {loop_count} 開始 ===")
 
-            user_text = exec_stt(stt)
+            try:
+                user_text = exec_stt(stt)
+            except KeyboardInterrupt:
+                print("\n\n音声認識中に中断されました。")
+                break
+            
             if not user_text:
-                print("音声が認識されませんでした。もう一度話してください。")
+                print("音声が認識されませんでした。もう一度話してください")
                 continue
             print(f"{owner_name}: {user_text}")
             
@@ -108,8 +115,12 @@ def main():
 def exec_stt(stt: SpeechToText) -> str:
     # 音声認識
     print("--- 音声入力待ち ---")
-    user_text = stt.listen_once()
-    return user_text
+    try:
+        user_text = stt.listen_once()
+        return user_text
+    except KeyboardInterrupt:
+        print("\n音声認識を中断しました。")
+        raise  # メインループに中断を伝える
 
 def check_end_command(user_text: str) -> bool:
     if "終了" in user_text or "バイバイ" in user_text or "さようなら" in user_text:
