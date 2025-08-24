@@ -1,5 +1,6 @@
 # halo.py
 import json
+import time
 import sys
 from llm import LLM
 from stt import SpeechToText
@@ -82,6 +83,7 @@ def main():
             owner_text = f"{owner_name}: {user_text}"
             history += owner_text + "\n"
             print(owner_text)
+            stt_end_time = time.perf_counter()
 
             # 終了コマンド
             if check_end_command(user_text):
@@ -106,7 +108,10 @@ def main():
                 print(f"LLMでエラーが発生しました: {e}")
                 continue  # エラーが発生してもループを続ける
             
-            # 応答を読み上げ（同期、終わるまで待つ）
+           
+            llm_end_time = time.perf_counter()
+            print(f"[LLM latency] {llm_end_time - stt_end_time:.1f} ms")
+             # 応答を読み上げ（同期、終わるまで待つ）
             exec_tts(tts, response)
             
             print(f"=== ループ {loop_count} 完了 ===")
