@@ -1,4 +1,4 @@
-# stt.py  (安全版 / 2周目以降も確実に再開)
+# stt.py  (WebRTC VADで発話終了を検出して返す版 / 安全に再開可能)
 import os, sys, queue, threading, time
 from typing import Optional
 import pyaudio
@@ -6,6 +6,8 @@ import google.auth
 from google.api_core.client_options import ClientOptions
 from google.cloud.speech_v2 import SpeechClient
 from google.cloud.speech_v2.types import cloud_speech as cs
+from google.protobuf import duration_pb2
+
 
 class SpeechToText:
     def __init__(self, language="ja-JP", model="latest_short", location="asia-northeast1"):
@@ -43,8 +45,10 @@ class SpeechToText:
         # 2) read() を解除（ここが肝）
         try:
             if self._stream is not None and self._stream.is_active():
-                try: self._stream.stop_stream()
-                except Exception: pass
+                try:
+                    self._stream.stop_stream()
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -62,11 +66,15 @@ class SpeechToText:
         # 5) デバイスを閉じる
         try:
             if self._stream is not None:
-                try: self._stream.close()
-                except Exception: pass
+                try:
+                    self._stream.close()
+                except Exception:
+                    pass
             if self._pa is not None:
-                try: self._pa.terminate()
-                except Exception: pass
+                try:
+                    self._pa.terminate()
+                except Exception:
+                    pass
         finally:
             self._stream = None
             self._pa = None
@@ -74,14 +82,17 @@ class SpeechToText:
             self._q = None
             # gRPC クライアントは都度作り直すので閉じてOK
             if hasattr(self.client, "close"):
-                try: self.client.close()
-                except Exception: pass
+                try:
+                    self.client.close()
+                except Exception:
+                    pass
             self._closed = True
 
     # ---- GCP ----
     def _get_project_id(self) -> str:
         pid = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCLOUD_PROJECT")
-        if pid: return pid
+        if pid:
+            return pid
         _, project_id = google.auth.default()
         if not project_id:
             raise RuntimeError("GOOGLE_CLOUD_PROJECT を設定するか、ADC を見直してください。")
@@ -98,7 +109,8 @@ class SpeechToText:
         try:
             info = self._pa.get_default_input_device_info()
         except Exception as e:
-            self._pa.terminate(); self._pa = None
+            self._pa.terminate()
+            self._pa = None
             raise RuntimeError("既定の入力デバイスが見つかりません。") from e
 
         idx = info["index"]
@@ -126,8 +138,10 @@ class SpeechToText:
                 pass
             finally:
                 # 終端通知
-                try: self._q.put_nowait(None)
-                except Exception: pass
+                try:
+                    self._q.put_nowait(None)
+                except Exception:
+                    pass
 
         # デーモンにしない（joinで確実に止める）
         self._producer = threading.Thread(target=fill_buffer, daemon=False)
@@ -160,9 +174,30 @@ class SpeechToText:
             model=self.MODEL,
             features=cs.RecognitionFeatures(enable_automatic_punctuation=True),
         )
-        streaming_config = cs.StreamingRecognitionConfig(config=recognition_config)
 
-        yield cs.StreamingRecognizeRequest(recognizer=recognizer_path, streaming_config=streaming_config)
+        # ★ WebRTC VAD（Voice Activity Events）を有効化し、無音終了タイムアウトも設定
+        #   latest_short を使う場合は END_OF_SINGLE_UTTERANCE が返りやすい。
+        streaming_features = cs.StreamingRecognitionFeatures(
+            enable_voice_activity_events=True,
+            voice_activity_timeout=cs.StreamingRecognitionFeatures.VoiceActivityTimeout(
+                # 発話開始を待つ最大時間（例: 5秒）
+                speech_start_timeout=duration_pb2.Duration(seconds=5, nanos=0),
+                # 無音が続いた後に終話とみなす時間（例: 800ms）
+                speech_end_timeout=duration_pb2.Duration(seconds=0, nanos=800_000_000),
+            ),
+        )
+
+        streaming_config = cs.StreamingRecognitionConfig(
+            config=recognition_config,
+            streaming_features=streaming_features,
+        )
+
+        # 初回は設定
+        yield cs.StreamingRecognizeRequest(
+            recognizer=recognizer_path,
+            streaming_config=streaming_config,
+        )
+        # 以降は音声データ
         for chunk in self._mic_stream():
             if self._stop_event.is_set():
                 break
@@ -171,53 +206,103 @@ class SpeechToText:
     # ---- public ----
     def listen_once(self, timeout_sec: float = 15.0) -> str:
         """
-        最初の確定結果を返して終了（latest_short向け）。
-        timeout を超えたら空文字で返す。
+        is_final を待たず、VADの発話終了で返す。
+        ただし「開始が来ていない」「テキスト未取得」の END は無視して継続する。
+        timeout 超過時は空文字で返す。
         """
         print(f"[Listening] language={self.LANGUAGE}, model={self.MODEL}, location={self.LOCATION}  (発話してください)")
         start = time.time()
         first_text_time = None
+        latest_text = ""
+        saw_vad_begin = False   # ★ VAD開始検出フラグ
+        saw_any_text = False    # ★ 何かしら文字を見たか
+
         try:
             responses = self.client.streaming_recognize(
                 requests=self._request_generator(),
-                timeout=timeout_sec  # 応答がまったく来ない時の保険
+                timeout=timeout_sec
             )
             for response in responses:
-                for result in response.results:
-                    if not result.alternatives:
-                        continue
-                    alt = result.alternatives[0]
-                    text = alt.transcript
-                    # 最初のテキストが出たら時間を記録
-                    if first_text_time is None and text and text.strip():
-                        first_text_time = time.perf_counter()
-                        
-                    if getattr(result, "is_final", False):
-                        final_time = time.perf_counter()
-                        print(text)
+                # ---- 1) VADイベント処理 ----
+                ev = getattr(response, "speech_event_type", 0)
+                if ev:
+                    BEGIN = cs.StreamingRecognizeResponse.SpeechEventType.SPEECH_ACTIVITY_BEGIN
+                    END1  = cs.StreamingRecognizeResponse.SpeechEventType.END_OF_SINGLE_UTTERANCE
+                    END2  = cs.StreamingRecognizeResponse.SpeechEventType.SPEECH_ACTIVITY_END
 
-                        # 最初の文字→確定までの時間を表示
-                        if first_text_time is not None:
-                            diff_ms = (final_time - first_text_time) * 1000.0
-                            print(f"[STT latency] first_char → is_final: {diff_ms:.1f} ms")
-                        
-                        # 先に停止して、read解除→join→close の順へ
+                    if ev == BEGIN:
+                        saw_vad_begin = True
+                        # print("[VAD] begin")
+
+                    elif ev in (END1, END2):
+                        # テキストが一度も出ていない/BEGINも来ていない END は無視して継続
+                        if not saw_vad_begin and not saw_any_text:
+                            # print("[VAD] end (ignored: no BEGIN/text yet)")
+                            continue
+                        if not latest_text.strip():
+                            # print("[VAD] end but no text -> keep listening")
+                            continue
+
+                        print("\n[VAD] speech end detected -> finishing")
                         self._stop_event.set()
-                        # 起きていない待ちを起こす
                         try:
                             if self._q is not None:
                                 self._q.put_nowait(None)
                         except Exception:
                             pass
-                        return text
-                    else:
-                        sys.stdout.write("\r" + text[:120]); sys.stdout.flush()
+                        if first_text_time is not None:
+                            diff_ms = (time.perf_counter() - first_text_time) * 1000.0
+                            print(f"[STT latency] first_char → VAD_end: {diff_ms:.1f} ms")
+                        return latest_text.strip()
 
-                    # 任意の安全装置（長すぎるセッションは終了）
-                    if time.time() - start > timeout_sec:
-                        return ""
+                    # 他イベントはスルー
+                    continue
+
+                # ---- 2) 認識結果（interim / final） ----
+                for result in response.results:
+                    if not result.alternatives:
+                        continue
+                    alt = result.alternatives[0]
+                    text = alt.transcript or ""
+
+                    if text.strip():
+                        latest_text = text
+                        saw_any_text = True
+                        if first_text_time is None:
+                            first_text_time = time.perf_counter()
+
+                    # コンソール表示（暫定）
+                    sys.stdout.write("\r" + latest_text[:120]); sys.stdout.flush()
+
+                    # フォールバック: is_final が来たら返す（任意）
+                    if getattr(result, "is_final", False) and latest_text.strip():
+                        print()
+                        print(latest_text)
+                        if first_text_time is not None:
+                            diff_ms = (time.perf_counter() - first_text_time) * 1000.0
+                            print(f"[STT latency] first_char → is_final: {diff_ms:.1f} ms")
+                        self._stop_event.set()
+                        try:
+                            if self._q is not None:
+                                self._q.put_nowait(None)
+                        except Exception:
+                            pass
+                        return latest_text.strip()
+
+                # ---- 3) セッション安全装置 ----
+                if time.time() - start > timeout_sec:
+                    return ""
         except KeyboardInterrupt:
             print("\n音声認識を中断しました。")
             return ""
         finally:
             self.close()
+
+
+
+if __name__ == "__main__":
+    # 単体テスト用: 1回だけ聞いて出力
+    with SpeechToText(language="ja-JP", model="latest_short", location="asia-northeast1") as stt:
+        text = stt.listen_once(timeout_sec=15.0)
+        print("\n=== RESULT ===")
+        print(text)
