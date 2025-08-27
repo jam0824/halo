@@ -124,6 +124,86 @@ class SpeechToText:
         return SpeechClient(client_options=ClientOptions(api_endpoint=endpoint))
 
     # ---- audio (hot reuse) ----
+    def _list_input_devices(self, pa: pyaudio.PyAudio):
+        """
+        入力可能なデバイス情報のみを抽出して返す。
+        """
+        devices = []
+        try:
+            count = pa.get_device_count()
+        except Exception:
+            return devices
+        for i in range(count):
+            try:
+                info = pa.get_device_info_by_index(i)
+            except Exception:
+                continue
+            if int(info.get("maxInputChannels", 0)) > 0:
+                devices.append(info)
+        return devices
+
+    def _prompt_select_device(self, pa: pyaudio.PyAudio) -> int:
+        """
+        初回のみ実行: コンソールにマイク一覧を表示し、番号で選択させる。
+        非対話環境では既定（または先頭）を返す。
+        戻り値は PyAudio の device index。
+        """
+        try:
+            default_info = pa.get_default_input_device_info()
+            default_index = int(default_info["index"])
+        except Exception:
+            default_info = None
+            default_index = None
+
+        devices = self._list_input_devices(pa)
+
+        # 非対話環境では即座に既定を返す
+        try:
+            is_tty = bool(sys.stdin and sys.stdin.isatty())
+        except Exception:
+            is_tty = False
+        if not is_tty:
+            if default_index is not None:
+                return default_index
+            if devices:
+                return int(devices[0]["index"])
+            raise RuntimeError("入力デバイスが見つかりません。")
+
+        if not devices:
+            if default_index is None:
+                raise RuntimeError("入力デバイスが見つかりません。")
+            return default_index
+
+        print("\n利用可能なマイク一覧（初回のみ選択できます）:")
+        numbered_indices = []
+        for n, info in enumerate(devices):
+            di = int(info["index"])
+            name = info.get("name", "unknown")
+            rate = int(info.get("defaultSampleRate", self.RATE))
+            ch = int(info.get("maxInputChannels", 0))
+            default_mark = " (既定)" if default_index is not None and di == default_index else ""
+            print(f"  [{n}] index={di}, name='{name}', channels={ch}, defaultRate={rate}{default_mark}")
+            numbered_indices.append(di)
+
+        try:
+            choice = input("マイク番号を選択してください（Enterで既定を使用）: ").strip()
+        except Exception:
+            choice = ""
+
+        if choice == "":
+            chosen = default_index if default_index is not None else numbered_indices[0]
+        else:
+            try:
+                n = int(choice)
+                if n < 0 or n >= len(numbered_indices):
+                    raise ValueError()
+                chosen = numbered_indices[n]
+            except Exception:
+                print("不正な入力です。既定のマイクを使用します。")
+                chosen = default_index if default_index is not None else numbered_indices[0]
+
+        return chosen
+
     def _ensure_input_started(self):
         """
         マイク入力をホットスタート。既に開いていれば start_stream のみ。
@@ -134,13 +214,19 @@ class SpeechToText:
         if self._pa is None:
             self._pa = pyaudio.PyAudio()
             try:
-                info = self._pa.get_default_input_device_info()
+                if self._input_device_index is None:
+                    # 初回のみ対話的に選択（Enterで既定）
+                    self._input_device_index = self._prompt_select_device(self._pa)
+                info = self._pa.get_device_info_by_index(self._input_device_index)
+                name = info.get("name", "unknown")
+                print(f"Using mic (hot): index={self._input_device_index}, name='{name}', capture_rate={self.RATE}")
             except Exception as e:
-                self._pa.terminate(); self._pa = None
-                raise RuntimeError("既定の入力デバイスが見つかりません。") from e
-            self._input_device_index = int(info["index"])
-            name = info.get("name", "unknown")
-            print(f"Using default mic (hot): index={self._input_device_index}, name='{name}', capture_rate={self.RATE}")
+                try:
+                    self._pa.terminate()
+                except Exception:
+                    pass
+                self._pa = None
+                raise RuntimeError("入力デバイスの初期化に失敗しました。") from e
 
         if self._stream is None:
             self._stream = self._pa.open(
