@@ -3,7 +3,7 @@
   "owner_name": "まつ",
   "your_name": "ハロ",
   "voiceVoxTTS": {
-    "base_url": "http://127.0.0.1:50021",
+    "base_url": "http://192.168.1.151:50021",
     "speaker": 89,
     "max_len": 80,
     "queue_size": 4,
