@@ -21,6 +21,8 @@ RING_MAXLEN  = 4096             # リングの最大深さ（余裕大きめ）
 ADAPTIVE_DROP_ENABLED = True    # 適応ドロップON/OFF切替
 PRINT_STATS_EVERY_SEC = 1.0     # 1秒ごとに統計表示
 
+VOICE_THRESHOLD = 50
+
 # ===== 共有状態 =====
 packet_buffer = collections.deque(maxlen=RING_MAXLEN)
 buffer_lock   = threading.Lock()
@@ -106,6 +108,9 @@ def audio_callback(outdata, frames, t, status):
 
             take = min(need, len(frm))
             outdata[written:written+take, :] = frm[:take, :]
+            if isSounded(frm):
+                print(f"frm: {frm[0][0]}")
+                print("音が鳴っている")
 
             if take < len(frm):
                 packet_buffer.appendleft(frm[take:, :].copy())
@@ -117,6 +122,12 @@ def audio_callback(outdata, frames, t, status):
         outdata[written:frames, :] = 0
 
     maybe_print_stats()
+
+def isSounded(frm):
+    """
+    音が鳴っているか判定する
+    """
+    return np.any(np.abs(frm[0][0]) > VOICE_THRESHOLD)
 
 def main():
     global running
