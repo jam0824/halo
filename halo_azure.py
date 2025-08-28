@@ -96,10 +96,6 @@ def main():
             if not user_text:
                 print("音声が認識されませんでした。もう一度話してください")
                 continue
-
-            if isfiller:
-                player.random_play(block=False)
-                print("filler再生中")
             
             user_text = apply_text_changes(user_text, change_name)
             owner_text = f"{owner_name}: {user_text}"
@@ -115,6 +111,10 @@ def main():
                 except Exception as e:
                     print(f"TTSでエラーが発生しました: {e}")
                 break
+            
+            if isfiller:
+                player.random_play(block=False)
+                print("filler再生中")
 
             print("LLMで応答を生成中...")
             try:
