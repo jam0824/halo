@@ -163,6 +163,7 @@ class VoiceVoxTTS:
     def _play(self, wav_bytes: bytes):
         with wave.open(BytesIO(wav_bytes), "rb") as wf:
             wav = sa.WaveObject.from_wave_read(wf)
+            print("音声再生中")
         self._play_obj = wav.play()
 
     @staticmethod
