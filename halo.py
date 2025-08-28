@@ -5,6 +5,7 @@ import sys
 from llm import LLM
 from stt import SpeechToText
 from voicevox import VoiceVoxTTS  # ← 追加：クラスをインポート
+from wav_player import WavPlayer
 
 def load_config(config_path: str = "config.json") -> dict:
     """設定ファイル（config.json）を読み込む"""
@@ -46,6 +47,7 @@ def main():
     your_name = config["your_name"]
     tts_config = config["voiceVoxTTS"]
     change_name = config["change_text"]
+    isfiller = config["use_filler"]
 
     llm = LLM()
     stt = SpeechToText()        # ← インスタンスは使い回す
@@ -60,6 +62,9 @@ def main():
         pitchScale=tts_config["pitchScale"], 
         intonationScale=tts_config["intonationScale"]
     )
+    if isfiller:
+        player = WavPlayer()
+        player.preload_dir("./filler")
 
     # ★ 初回ターンも速くしたい場合はプリウォーム（任意）
     try:
@@ -87,6 +92,10 @@ def main():
                 print("音声が認識されませんでした。もう一度話してください")
                 continue
 
+            if isfiller:
+                player.random_play(block=False)
+                print("filler再生中")
+            
             user_text = apply_text_changes(user_text, change_name)
             owner_text = f"{owner_name}: {user_text}"
             history += owner_text + "\n"
