@@ -6,6 +6,7 @@ from llm import LLM
 from stt import SpeechToText
 from voicevox import VoiceVoxTTS  # ← 追加：クラスをインポート
 from wav_player import WavPlayer
+from stt_azure import AzureSpeechToText
 
 def load_config(config_path: str = "config.json") -> dict:
     """設定ファイル（config.json）を読み込む"""
@@ -50,7 +51,8 @@ def main():
     isfiller = config["use_filler"]
 
     llm = LLM()
-    stt = SpeechToText()        # ← インスタンスは使い回す
+    # stt = SpeechToText()
+    stt = AzureSpeechToText()
     tts = VoiceVoxTTS(
         base_url=tts_config["base_url"],
         speaker=tts_config["speaker"],
@@ -83,7 +85,10 @@ def main():
             print(f"\n=== ループ {loop_count} 開始 ===")
 
             try:
+                stt_start_time = time.perf_counter()
                 user_text = exec_stt(stt)   # ← listen_once() は内部で「一時停止」までやる
+                stt_end_time = time.perf_counter()
+                print(f"[STT latency] {stt_end_time - stt_start_time:.1f} ms")
             except KeyboardInterrupt:
                 print("\n\n音声認識中に中断されました。")
                 break
@@ -145,7 +150,7 @@ def main():
         try: stt.close()
         except: pass
 
-def exec_stt(stt: SpeechToText) -> str:
+def exec_stt(stt: AzureSpeechToText) -> str:
     # 音声認識
     print("--- 音声入力待ち ---")
     try:
