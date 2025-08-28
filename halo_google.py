@@ -51,8 +51,8 @@ def main():
     isfiller = config["use_filler"]
 
     llm = LLM()
-    # stt = SpeechToText()
-    stt = AzureSpeechToText()
+    stt = SpeechToText()
+    # stt = AzureSpeechToText()
     tts = VoiceVoxTTS(
         base_url=tts_config["base_url"],
         speaker=tts_config["speaker"],
@@ -150,7 +150,7 @@ def main():
         try: stt.close()
         except: pass
 
-def exec_stt(stt: AzureSpeechToText) -> str:
+def exec_stt(stt: SpeechToText) -> str:
     # 音声認識
     print("--- 音声入力待ち ---")
     try:

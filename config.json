@@ -11,7 +11,7 @@
     "pitchScale": 0.0,
     "intonationScale": 1.0
   },
-  "use_filler": true,
+  "use_filler": false,
   "change_text":{
     "春": "ハロ"
   }
