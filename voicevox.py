@@ -102,6 +102,7 @@ class VoiceVoxTTS:
             with self._suppress_ex():
                 if self._play_obj:
                     self._play_obj.stop()
+                    print("音声再生終了")
             self._drain_queue(q)
 
         t_p = threading.Thread(target=producer, daemon=True)
