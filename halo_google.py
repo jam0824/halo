@@ -3,7 +3,7 @@ import json
 import time
 import sys
 from llm import LLM
-from stt import SpeechToText
+from stt_google import GoogleSpeechToText
 from voicevox import VoiceVoxTTS  # ← 追加：クラスをインポート
 from wav_player import WavPlayer
 from stt_azure import AzureSpeechToText
@@ -51,8 +51,7 @@ def main():
     isfiller = config["use_filler"]
 
     llm = LLM()
-    stt = SpeechToText()
-    # stt = AzureSpeechToText()
+    stt = GoogleSpeechToText()
     tts = VoiceVoxTTS(
         base_url=tts_config["base_url"],
         speaker=tts_config["speaker"],
@@ -150,7 +149,7 @@ def main():
         try: stt.close()
         except: pass
 
-def exec_stt(stt: SpeechToText) -> str:
+def exec_stt(stt: GoogleSpeechToText) -> str:
     # 音声認識
     print("--- 音声入力待ち ---")
     try:
