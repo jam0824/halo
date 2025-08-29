@@ -2,7 +2,7 @@
 import json
 import time
 import sys
-from llm import LLM
+from llm_stream import openai_token_stream
 from voicevox import VoiceVoxTTS  # ← 追加：クラスをインポート
 from wav_player import WavPlayer
 from stt_azure import AzureSpeechToText
@@ -49,7 +49,6 @@ def main():
     change_name = config["change_text"]
     isfiller = config["use_filler"]
 
-    llm = LLM()
     stt = AzureSpeechToText()
     tts = VoiceVoxTTS(
         base_url=tts_config["base_url"],
@@ -116,11 +115,14 @@ def main():
 
             print("LLMで応答を生成中...")
             try:
-                response = llm.generate_text(user_text, system_content, history)
+                response = openai_token_stream(user_text, system_content, history)
+                tts.stream_speak(response)
+                '''
                 response = response.replace(f"{your_name}:", "")
                 your_text = f"{your_name}: {response}"
                 history += your_text + "\n"
                 print(your_text)
+                '''
             except Exception as e:
                 print(f"LLMでエラーが発生しました: {e}")
                 continue
@@ -128,8 +130,6 @@ def main():
             llm_end_time = time.perf_counter()
             print(f"[LLM latency] {llm_end_time - stt_end_time:.1f} ms")
 
-            # 応答を読み上げ（この間は STT は一時停止状態）
-            exec_tts(tts, response)
 
             print(f"=== ループ {loop_count} 完了 ===")
 

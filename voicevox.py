@@ -181,6 +181,74 @@ class VoiceVoxTTS:
             def __exit__(self, exc_type, exc, tb):
                 return True  # すべて無視
         return _Ctx()
+    
+    _SENT_END = re.compile(r"[。．！？!?]\s*$")  # 文末検出（日本語/記号）
+
+    def stream_speak(self, token_iter):
+        """
+        ストリーミング入力（文字列断片のイテレータ）を文単位にまとめて
+        でき次第 VOICEVOX で合成→即時再生する。stop() で中断可。
+        """
+        self._stop_event.clear()
+        q: "queue.Queue" = queue.Queue(maxsize=self.queue_size)
+        STOP = object()
+
+        def producer():
+            buf = ""
+            try:
+                for token in token_iter:
+                    if self._stop_event.is_set():
+                        break
+                    buf += token
+                    # 文末 or 長すぎ対策でフラッシュ
+                    if self._SENT_END.search(buf) or len(buf) >= self.max_len:
+                        s = buf.strip()
+                        if s:
+                            q.put(("text", s))
+                        buf = ""
+                # 取りこぼしがあれば最後に流す
+                tail = buf.strip()
+                if tail:
+                    q.put(("text", tail))
+            finally:
+                q.put(STOP)
+
+        def consumer():
+            while True:
+                item = q.get()
+                if item is STOP:
+                    break
+                tag, sent = item
+                if self._stop_event.is_set():
+                    break
+                if tag == "text":
+                    # 合成 → 再生（既存の内部関数を流用）
+                    query = self._audio_query(sent, self.speaker)
+                    query.update(self.params)
+                    wav_bytes = self._synth(query, self.speaker)
+                    self._play(wav_bytes)
+                    if self._play_obj:
+                        self._play_obj.wait_done()
+
+            # 後片付け
+            with self._suppress_ex():
+                if self._play_obj:
+                    self._play_obj.stop()
+            self._drain_queue(q)
+
+        t_p = threading.Thread(target=producer, daemon=True)
+        t_c = threading.Thread(target=consumer, daemon=True)
+        t_p.start(); t_c.start()
+        t_p.join(); t_c.join()
+
+    # （任意）単一文を即読みするヘルパーが欲しければこれも：
+    def speak_sentence(self, sent: str):
+        query = self._audio_query(sent, self.speaker)
+        query.update(self.params)
+        wav_bytes = self._synth(query, self.speaker)
+        self._play(wav_bytes)
+        if self._play_obj:
+            self._play_obj.wait_done()
 
 
 # --------- 使い方例 ---------
