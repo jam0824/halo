@@ -7,6 +7,7 @@ from typing import Dict, Optional
 
 import requests
 import simpleaudio as sa
+from function_led import LEDBlinker
 
 
 class VoiceVoxTTS:
@@ -18,6 +19,8 @@ class VoiceVoxTTS:
     """
 
     _SENT_SPLIT = re.compile(r"(.*?[。！？\?\!]|[^。！？\?\!]+$)")
+    PIN_LED = 17
+    isLED = True
 
     def __init__(
         self,
@@ -48,6 +51,9 @@ class VoiceVoxTTS:
         }
         if default_params:
             self.params.update(default_params)
+        if self.isLED:
+            self.led = LEDBlinker(self.PIN_LED)
+            self.isLEDBlink = False
 
         # 実行時制御
         self._stop_event = threading.Event()
@@ -102,6 +108,7 @@ class VoiceVoxTTS:
             with self._suppress_ex():
                 if self._play_obj:
                     self._play_obj.stop()
+                    self._led_stop_blink()
                     print("音声再生終了")
             self._drain_queue(q)
 
@@ -164,8 +171,20 @@ class VoiceVoxTTS:
     def _play(self, wav_bytes: bytes):
         with wave.open(BytesIO(wav_bytes), "rb") as wf:
             wav = sa.WaveObject.from_wave_read(wf)
-            print("音声再生中")
+        self._led_start_blink()
         self._play_obj = wav.play()
+    
+    def _led_start_blink(self):
+        if self.isLED and not self.isLEDBlink:
+            self.isLEDBlink = True
+            self.led.start_blink()
+            print("LED 点滅開始")
+
+    def _led_stop_blink(self):
+        if self.isLED and self.isLEDBlink:
+            self.isLEDBlink = False
+            self.led.stop_blink()
+            print("LED 点滅終了")
 
     @staticmethod
     def _drain_queue(q: "queue.Queue"):
