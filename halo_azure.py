@@ -5,7 +5,10 @@ from llm import LLM
 from voicevox import VoiceVoxTTS  # ← 追加：クラスをインポート
 from wav_player import WavPlayer
 from stt_azure import AzureSpeechToText
-from function_led import LEDBlinker
+from typing import Optional, TYPE_CHECKING
+if TYPE_CHECKING:
+    from function_led import LEDBlinker
+
 
 def load_config(config_path: str = "config.json") -> dict:
     """設定ファイル（config.json）を読み込む"""
@@ -54,10 +57,19 @@ def main():
     isfiller = config["use_filler"]
     use_led = config["led"]["use_led"]
     led_pin = config["led"]["led_pin"]
+        
 
     llm = LLM()
     stt = AzureSpeechToText()
-    led = LEDBlinker(led_pin)
+    led: Optional["LEDBlinker"] = None
+    if use_led:
+        try:
+            from function_led import LEDBlinker  # 遅延インポート
+            led = LEDBlinker(led_pin)
+        except Exception as e:
+            print(f"LED機能を無効化します: {e}")
+            use_led = False
+            led = None
     tts = VoiceVoxTTS(
         base_url=tts_config["base_url"],
         speaker=tts_config["speaker"],
@@ -118,7 +130,7 @@ def main():
                 break
             
             if isfiller:
-                if use_led:
+                if use_led and led:
                     led.start_blink()
                 player.random_play(block=False)
                 print("filler再生中")
@@ -172,7 +184,7 @@ def check_end_command(user_text: str) -> bool:
         return True
     return False
 
-def exec_tts(tts: VoiceVoxTTS, text: str, led: LEDBlinker, isLed: bool):
+def exec_tts(tts: VoiceVoxTTS, text: str, led: Optional["LEDBlinker"], isLed: bool):
     try:
         tts.speak(text, led, isLed)
     except KeyboardInterrupt:

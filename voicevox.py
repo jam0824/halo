@@ -3,11 +3,12 @@ import re
 import queue
 import threading
 from io import BytesIO
-from typing import Dict, Optional
+from typing import Dict, Optional, TYPE_CHECKING
 
 import requests
 import simpleaudio as sa
-from function_led import LEDBlinker
+if TYPE_CHECKING:
+    from function_led import LEDBlinker
 
 
 class VoiceVoxTTS:
@@ -64,7 +65,7 @@ class VoiceVoxTTS:
         """例: set_params(speedScale=1.1, pitchScale=-0.2)"""
         self.params.update(kwargs)
 
-    def speak(self, text: str, led: LEDBlinker, isLed: bool):
+    def speak(self, text: str, led: Optional["LEDBlinker"], isLed: bool):
         """
         同期実行：合成＆再生を行い、完了（または stop()）まで戻らない。
         """
@@ -174,12 +175,12 @@ class VoiceVoxTTS:
         self._play_obj = wav.play()
     
     def _led_start_blink(self):
-        if self.isLed:
+        if self.isLed and self.led is not None:
             self.led.start_blink()
             print("LED 点滅開始")
 
     def _led_stop_blink(self):
-        if self.isLed:
+        if self.isLed and self.led is not None:
             self.led.stop_blink()
             print("LED 点滅終了")
 
