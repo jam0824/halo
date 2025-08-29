@@ -194,7 +194,7 @@ async def stream_audio_and_receive_response():
             "session": {
                 "modalities": ["audio", "text"],
                 "instructions": "あなたはガンダムに出てくるハロです。ハロは片言で話します。短く話します。",
-                "voice": "echo",
+                "voice": "cedar",
                 "turn_detection": {"type": "none"}
             }
         }
