@@ -3,10 +3,12 @@ import re
 import queue
 import threading
 from io import BytesIO
-from typing import Dict, Optional
+from typing import Dict, Optional, TYPE_CHECKING
 
 import requests
 import simpleaudio as sa
+if TYPE_CHECKING:
+    from function_led import LEDBlinker
 
 
 class VoiceVoxTTS:
@@ -48,6 +50,8 @@ class VoiceVoxTTS:
         }
         if default_params:
             self.params.update(default_params)
+        self.led = None
+        self.isLed = False
 
         # 実行時制御
         self._stop_event = threading.Event()
@@ -61,10 +65,12 @@ class VoiceVoxTTS:
         """例: set_params(speedScale=1.1, pitchScale=-0.2)"""
         self.params.update(kwargs)
 
-    def speak(self, text: str):
+    def speak(self, text: str, led: Optional["LEDBlinker"], isLed: bool):
         """
         同期実行：合成＆再生を行い、完了（または stop()）まで戻らない。
         """
+        self.led = led
+        self.isLed = isLed
         self._stop_event.clear()
         chunks = self._split_into_chunks(text, self.max_len)
         q: "queue.Queue" = queue.Queue(maxsize=self.queue_size)
@@ -102,6 +108,7 @@ class VoiceVoxTTS:
             with self._suppress_ex():
                 if self._play_obj:
                     self._play_obj.stop()
+                    self._led_stop_blink()
                     print("音声再生終了")
             self._drain_queue(q)
 
@@ -164,8 +171,18 @@ class VoiceVoxTTS:
     def _play(self, wav_bytes: bytes):
         with wave.open(BytesIO(wav_bytes), "rb") as wf:
             wav = sa.WaveObject.from_wave_read(wf)
-            print("音声再生中")
+        self._led_start_blink()
         self._play_obj = wav.play()
+    
+    def _led_start_blink(self):
+        if self.isLed and self.led is not None:
+            self.led.start_blink()
+            print("LED 点滅開始")
+
+    def _led_stop_blink(self):
+        if self.isLed and self.led is not None:
+            self.led.stop_blink()
+            print("LED 点滅終了")
 
     @staticmethod
     def _drain_queue(q: "queue.Queue"):
