@@ -19,8 +19,6 @@ class VoiceVoxTTS:
     """
 
     _SENT_SPLIT = re.compile(r"(.*?[。！？\?\!]|[^。！？\?\!]+$)")
-    PIN_LED = 17
-    isLED = True
 
     def __init__(
         self,
@@ -51,9 +49,8 @@ class VoiceVoxTTS:
         }
         if default_params:
             self.params.update(default_params)
-        if self.isLED:
-            self.led = LEDBlinker(self.PIN_LED)
-            self.isLEDBlink = False
+        self.led = None
+        self.isLed = False
 
         # 実行時制御
         self._stop_event = threading.Event()
@@ -67,10 +64,12 @@ class VoiceVoxTTS:
         """例: set_params(speedScale=1.1, pitchScale=-0.2)"""
         self.params.update(kwargs)
 
-    def speak(self, text: str):
+    def speak(self, text: str, led: LEDBlinker, isLed: bool):
         """
         同期実行：合成＆再生を行い、完了（または stop()）まで戻らない。
         """
+        self.led = led
+        self.isLed = isLed
         self._stop_event.clear()
         chunks = self._split_into_chunks(text, self.max_len)
         q: "queue.Queue" = queue.Queue(maxsize=self.queue_size)
@@ -175,14 +174,12 @@ class VoiceVoxTTS:
         self._play_obj = wav.play()
     
     def _led_start_blink(self):
-        if self.isLED and not self.isLEDBlink:
-            self.isLEDBlink = True
+        if self.isLed:
             self.led.start_blink()
             print("LED 点滅開始")
 
     def _led_stop_blink(self):
-        if self.isLED and self.isLEDBlink:
-            self.isLEDBlink = False
+        if self.isLed:
             self.led.stop_blink()
             print("LED 点滅終了")
 

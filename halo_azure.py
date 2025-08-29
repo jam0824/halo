@@ -1,11 +1,11 @@
 # halo.py
 import json
 import time
-import sys
 from llm import LLM
 from voicevox import VoiceVoxTTS  # ← 追加：クラスをインポート
 from wav_player import WavPlayer
 from stt_azure import AzureSpeechToText
+from function_led import LEDBlinker
 
 def load_config(config_path: str = "config.json") -> dict:
     """設定ファイル（config.json）を読み込む"""
@@ -37,6 +37,10 @@ def get_default_config() -> dict:
             "speedScale": 1.0,
             "pitchScale": 0.0,
             "intonationScale": 1.0
+        },
+        "led":{
+            "use_led": True,
+            "led_pin": 17
         }
     }
 
@@ -48,9 +52,12 @@ def main():
     tts_config = config["voiceVoxTTS"]
     change_name = config["change_text"]
     isfiller = config["use_filler"]
+    use_led = config["led"]["use_led"]
+    led_pin = config["led"]["led_pin"]
 
     llm = LLM()
     stt = AzureSpeechToText()
+    led = LEDBlinker(led_pin)
     tts = VoiceVoxTTS(
         base_url=tts_config["base_url"],
         speaker=tts_config["speaker"],
@@ -105,12 +112,14 @@ def main():
                 farewell = "バイバイ！"
                 print(f"{your_name}: {farewell}")
                 try:
-                    tts.speak(farewell)
+                    tts.speak(farewell, led, use_led)
                 except Exception as e:
                     print(f"TTSでエラーが発生しました: {e}")
                 break
             
             if isfiller:
+                if use_led:
+                    led.start_blink()
                 player.random_play(block=False)
                 print("filler再生中")
 
@@ -129,7 +138,7 @@ def main():
             print(f"[LLM latency] {llm_end_time - stt_end_time:.1f} ms")
 
             # 応答を読み上げ（この間は STT は一時停止状態）
-            exec_tts(tts, response)
+            exec_tts(tts, response, led, use_led)
 
             print(f"=== ループ {loop_count} 完了 ===")
 
@@ -163,9 +172,9 @@ def check_end_command(user_text: str) -> bool:
         return True
     return False
 
-def exec_tts(tts: VoiceVoxTTS, text: str):
+def exec_tts(tts: VoiceVoxTTS, text: str, led: LEDBlinker, isLed: bool):
     try:
-        tts.speak(text)
+        tts.speak(text, led, isLed)
     except KeyboardInterrupt:
         tts.stop()
         print("\n読み上げを中断しました。")

@@ -33,7 +33,7 @@ class LEDBlinker:
     self.stop_blink()
     GPIO.output(self.pin, GPIO.LOW)
 
-  def start_blink(self, on_sec: float = 0.5, off_sec: float = 0.5):
+  def start_blink(self, on_sec: float = 0.3, off_sec: float = 0.3):
     with self._lock:
       self.stop_blink()
       self._stop_event.clear()

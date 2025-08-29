@@ -12,6 +12,10 @@
     "intonationScale": 1.0
   },
   "use_filler": false,
+  "led":{
+    "use_led": false,
+    "led_pin": 17
+  },
   "change_text":{
     "春": "ハロ"
   }
