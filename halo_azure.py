@@ -103,6 +103,8 @@ def main():
     if isfiller:
         player = WavPlayer()
         player.preload_dir("./filler")
+    else:
+        player = None
 
     # ★ 初回ターンも速くしたい場合はプリウォーム（任意）
     try:
@@ -128,53 +130,35 @@ def main():
             except KeyboardInterrupt:
                 print("\n\n音声認識中に中断されました。")
                 break
-
             if not user_text:
                 print("音声が認識されませんでした。もう一度話してください")
                 continue
 
             user_text = apply_text_changes(user_text, change_name)
-            owner_text = f"{owner_name}: {user_text}"
-            history += owner_text + "\n"
-            print(owner_text)
-            stt_end_time = time.perf_counter()
+            history = make_history(history, owner_name, user_text)
 
-            if use_motor and motor:
-                motor.tilt_kyoro_kyoro(90, 0, 2)
-
-            if check_end_command(user_text):
-                farewell = "バイバイ！"
-                print(f"{your_name}: {farewell}")
-                try:
-                    tts.speak(farewell, led, use_led)
-                except Exception as e:
-                    print(f"TTSでエラーが発生しました: {e}")
+            # バイバイの場合
+            if is_ferewell(user_text, tts, led, use_led, your_name):
                 break
             
-            if isfiller:
-                if use_led and led:
-                    led.start_blink()
-                player.random_play(block=False)
-                print("filler再生中")
+            # fillerを再生する場合
+            say_filler(isfiller, player, use_led, led)
 
             print("LLMで応答を生成中...")
+            llm_start_time = time.perf_counter()
             try:
                 response = llm.generate_text(user_text, system_content, history)
-                response = response.replace(f"{your_name}:", "")
-                your_text = f"{your_name}: {response}"
-                history += your_text + "\n"
-                print(your_text)
+                response = response.replace(f"{your_name}:", "") # 名前ラベルが作ったテキストに入ることがあるため削除
+                history = make_history(history, your_name, response)
             except Exception as e:
                 print(f"LLMでエラーが発生しました: {e}")
                 continue
-
             llm_end_time = time.perf_counter()
-            print(f"[LLM latency] {llm_end_time - stt_end_time:.1f} ms")
+            print(f"[LLM latency] {llm_end_time - llm_start_time:.1f} ms")
 
-            if use_motor and motor:
-                motor.pan_kyoro_kyoro(60, 120, 1)
-
+            
             # 応答を読み上げ（この間は STT は一時停止状態）
+            move_motor(use_motor, motor)
             exec_tts(tts, response, led, use_led)
 
             print(f"=== ループ {loop_count} 完了 ===")
@@ -197,6 +181,35 @@ def main():
             if use_motor and 'motor' in locals() and motor:
                 motor.clean_up()
         except: pass
+
+def is_ferewell(user_text: str, tts: VoiceVoxTTS, led: Optional["LEDBlinker"], use_led: bool, your_name: str) -> bool:
+    if not check_end_command(user_text):
+        return False
+    farewell = "バイバイ！"
+    print(f"{your_name}: {farewell}")
+    try:
+        tts.speak(farewell, led, use_led)
+    except Exception as e:
+        print(f"TTSでエラーが発生しました: {e}")
+    return True
+
+def make_history(history: str, name: str, message: str) -> str:
+    line_text = f"{name}: {message}"
+    history += line_text + "\n"
+    print(line_text)
+    return history
+
+def move_motor(use_motor: bool, motor: Optional["Motor"]):
+    if use_motor and motor:
+        motor.pan_kyoro_kyoro(60, 120, 1)
+        
+def say_filler(isfiller: bool, player: WavPlayer, use_led: bool, led: Optional["LEDBlinker"]):
+    if isfiller:
+        if use_led and led:
+            led.start_blink()
+        player.random_play(block=False)
+        print("filler再生中")
+
 
 def exec_stt(stt: AzureSpeechToText) -> str:
     # 音声認識
