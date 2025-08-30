@@ -4,6 +4,8 @@ import threading
 
 
 class Motor:
+    PAN_START_ANGLE = 90
+    TILT_START_ANGLE = 90
     def __init__(self, pan_pin:int = 4, tilt_pin:int = 17, frequency:int = 50):
         self.pan_pin = pan_pin
         self.tilt_pin = tilt_pin
@@ -19,7 +21,7 @@ class Motor:
         GPIO.setup(self.tilt_pin, GPIO.OUT)
         self.pan_pwm = GPIO.PWM(self.pan_pin, self.frequency)
         self.tilt_pwm = GPIO.PWM(self.tilt_pin, self.frequency)
-        self.init_position(0, 0)
+        self.init_position(self.PAN_START_ANGLE, self.TILT_START_ANGLE)
     
     def __del__(self):
         try:
@@ -62,11 +64,11 @@ class Motor:
         return False
         
     def init_position(self, pan_angle:float=0, tilt_angle:float=0):
-        self.pan_pwm.start(self.get_motor_duty(0))
-        self.tilt_pwm.start(self.get_motor_duty(0))
+        self.pan_pwm.start(self.get_motor_duty(pan_angle))
+        self.tilt_pwm.start(self.get_motor_duty(pan_angle))
 
     def get_motor_ms(self, angle:float) -> float:
-        x = (225 - angle) / 90
+        x = (360 - angle) / 180
         return x
 
     def get_motor_duty(self, angle:float) -> float:
@@ -78,6 +80,13 @@ class Motor:
     
     def change_tilt_angle(self, angle:float):
         self.tilt_pwm.ChangeDutyCycle(self.get_motor_duty(angle))
+
+    def pan_to_start_position(self):
+        self.change_pan_angle(self.PAN_START_ANGLE)
+    
+    def tilt_to_start_position(self):
+        self.change_tilt_angle(self.TILT_START_ANGLE)
+
 
     def _sleep_with_cancel(self, seconds:float, stop_event:threading.Event) -> bool:
         remaining = max(0.0, float(seconds))
@@ -147,7 +156,21 @@ class Motor:
 
 if __name__ == "__main__":
     with Motor() as motor:
+        print("start position")
+        sleep(5)
+        print("pan_kyoro_kyoro")
         motor.pan_kyoro_kyoro(60, 120, 1)
-        motor.tilt_kyoro_kyoro(90, 0, 1)
-        sleep(3)
+        print("tilt_kyoro_kyoro")
+        motor.tilt_kyoro_kyoro(45, 90, 1)
+        sleep(5)
+        print("tilt0")
+        motor.change_tilt_angle(0)
+        sleep(5)
+        print("tilt90")
+        motor.change_tilt_angle(90)
+        sleep(5)
+        print("スタートポジションに戻します")
+        motor.pan_to_start_position()
+        motor.tilt_to_start_position()
+        
 
