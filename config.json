@@ -14,7 +14,12 @@
   "use_filler": false,
   "led":{
     "use_led": false,
-    "led_pin": 17
+    "led_pin": 27
+  },
+  "motor": {
+    "pan_pin": 4,
+    "tilt_pin": 17,
+    "use_motor": false
   },
   "change_text":{
     "春": "ハロ"

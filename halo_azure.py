@@ -8,6 +8,7 @@ from stt_azure import AzureSpeechToText
 from typing import Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from function_led import LEDBlinker
+    from function_motor import Motor
 
 
 def load_config(config_path: str = "config.json") -> dict:
@@ -44,6 +45,11 @@ def get_default_config() -> dict:
         "led":{
             "use_led": True,
             "led_pin": 17
+        },
+        "motor": {
+            "use_motor": True,
+            "pan_pin": 4,
+            "tilt_pin": 17
         }
     }
 
@@ -57,6 +63,9 @@ def main():
     isfiller = config["use_filler"]
     use_led = config["led"]["use_led"]
     led_pin = config["led"]["led_pin"]
+    use_motor = config["motor"]["use_motor"]
+    pan_pin = config["motor"]["pan_pin"]
+    tilt_pin = config["motor"]["tilt_pin"]
         
 
     llm = LLM()
@@ -70,6 +79,16 @@ def main():
             print(f"LED機能を無効化します: {e}")
             use_led = False
             led = None
+    motor: Optional["Motor"] = None
+    if use_motor:
+        try:
+            from function_motor import Motor
+            motor = Motor(pan_pin, tilt_pin)
+        except Exception as e:
+            print(f"モーター機能を無効化します: {e}")
+            use_motor = False
+            motor = None
+
     tts = VoiceVoxTTS(
         base_url=tts_config["base_url"],
         speaker=tts_config["speaker"],
@@ -113,12 +132,15 @@ def main():
             if not user_text:
                 print("音声が認識されませんでした。もう一度話してください")
                 continue
-            
+
             user_text = apply_text_changes(user_text, change_name)
             owner_text = f"{owner_name}: {user_text}"
             history += owner_text + "\n"
             print(owner_text)
             stt_end_time = time.perf_counter()
+
+            if use_motor and motor:
+                motor.tilt_kyoro_kyoro(90, 0, 2)
 
             if check_end_command(user_text):
                 farewell = "バイバイ！"
@@ -149,6 +171,9 @@ def main():
             llm_end_time = time.perf_counter()
             print(f"[LLM latency] {llm_end_time - stt_end_time:.1f} ms")
 
+            if use_motor and motor:
+                motor.pan_kyoro_kyoro(60, 120, 1)
+
             # 応答を読み上げ（この間は STT は一時停止状態）
             exec_tts(tts, response, led, use_led)
 
@@ -167,6 +192,10 @@ def main():
     finally:
         # ★ プロセス終了時にだけ完全に解放
         try: stt.close()
+        except: pass
+        try:
+            if use_motor and 'motor' in locals() and motor:
+                motor.clean_up()
         except: pass
 
 def exec_stt(stt: AzureSpeechToText) -> str:
