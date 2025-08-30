@@ -99,29 +99,31 @@ class Motor:
             remaining -= chunk
         return stop_event.is_set()
 
-    def _pan_worker(self, left_angle:float, right_angle:float, duration:float):
+    def _pan_worker(self, left_angle:float, right_angle:float, duration:float, count:int=1):
         self._pan_stop_event.clear()
         if self._pan_stop_event.is_set():
             return
-        self.change_pan_angle(left_angle)
-        if self._sleep_with_cancel(duration, self._pan_stop_event):
-            return
-        self.change_pan_angle(right_angle)
-        if self._sleep_with_cancel(duration, self._pan_stop_event):
-            return
+        for _ in range(max(1, int(count))):
+            self.change_pan_angle(left_angle)
+            if self._sleep_with_cancel(duration, self._pan_stop_event):
+                return
+            self.change_pan_angle(right_angle)
+            if self._sleep_with_cancel(duration, self._pan_stop_event):
+                return
 
-    def _tilt_worker(self, up_angle:float, down_angle:float, duration:float):
+    def _tilt_worker(self, up_angle:float, down_angle:float, duration:float, count:int=1):
         self._tilt_stop_event.clear()
         if self._tilt_stop_event.is_set():
             return
-        self.change_tilt_angle(up_angle)
-        if self._sleep_with_cancel(duration, self._tilt_stop_event):
-            return
-        self.change_tilt_angle(down_angle)
-        if self._sleep_with_cancel(duration, self._tilt_stop_event):
-            return
+        for _ in range(max(1, int(count))):
+            self.change_tilt_angle(up_angle)
+            if self._sleep_with_cancel(duration, self._tilt_stop_event):
+                return
+            self.change_tilt_angle(down_angle)
+            if self._sleep_with_cancel(duration, self._tilt_stop_event):
+                return
 
-    def pan_kyoro_kyoro(self, left_angle:float, right_angle:float, time:float):
+    def pan_kyoro_kyoro(self, left_angle:float, right_angle:float, time:float, count:int=1):
         # 既存の動作があれば停止を指示
         try:
             self._pan_stop_event.set()
@@ -132,12 +134,12 @@ class Motor:
         # 非ブロッキング開始
         self._pan_thread = threading.Thread(
             target=self._pan_worker,
-            args=(left_angle, right_angle, time),
+            args=(left_angle, right_angle, time, count),
             daemon=True,
         )
         self._pan_thread.start()
     
-    def tilt_kyoro_kyoro(self, up_angle:float, down_angle:float, time:float):
+    def tilt_kyoro_kyoro(self, up_angle:float, down_angle:float, time:float, count:int=1):
         # 既存の動作があれば停止を指示
         try:
             self._tilt_stop_event.set()
@@ -148,7 +150,7 @@ class Motor:
         # 非ブロッキング開始
         self._tilt_thread = threading.Thread(
             target=self._tilt_worker,
-            args=(up_angle, down_angle, time),
+            args=(up_angle, down_angle, time, count),
             daemon=True,
         )
         self._tilt_thread.start()
@@ -159,9 +161,9 @@ if __name__ == "__main__":
         print("start position")
         sleep(5)
         print("pan_kyoro_kyoro")
-        motor.pan_kyoro_kyoro(60, 120, 1)
+        motor.pan_kyoro_kyoro(60, 120, 1, 1)
         print("tilt_kyoro_kyoro")
-        motor.tilt_kyoro_kyoro(45, 90, 1)
+        motor.tilt_kyoro_kyoro(45, 90, 0.5, 5)
         sleep(5)
         print("tilt0")
         motor.change_tilt_angle(0)

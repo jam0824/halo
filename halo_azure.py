@@ -142,7 +142,7 @@ def main():
                 break
             
             # fillerを再生する場合
-            say_filler(isfiller, player, use_led, led)
+            say_filler(isfiller, player, use_led, led, use_motor, motor)
 
             print("LLMで応答を生成中...")
             llm_start_time = time.perf_counter()
@@ -158,7 +158,8 @@ def main():
 
             
             # 応答を読み上げ（この間は STT は一時停止状態）
-            move_motor(use_motor, motor)
+            move_pan_kyoro_kyoro(use_motor, motor)
+            move_tilt_kyoro_kyoro(use_motor, motor,2)
             exec_tts(tts, response, led, use_led)
 
             print(f"=== ループ {loop_count} 完了 ===")
@@ -199,14 +200,19 @@ def make_history(history: str, name: str, message: str) -> str:
     print(line_text)
     return history
 
-def move_motor(use_motor: bool, motor: Optional["Motor"]):
+def move_pan_kyoro_kyoro(use_motor: bool, motor: Optional["Motor"]):
     if use_motor and motor:
-        motor.pan_kyoro_kyoro(60, 120, 1)
+        motor.pan_kyoro_kyoro(60, 120, 1, 1)
+def move_tilt_kyoro_kyoro(use_motor: bool, motor: Optional["Motor"], count: int=1):
+    if use_motor and motor:
+        motor.tilt_kyoro_kyoro(45, 90, 0.5, count)
         
-def say_filler(isfiller: bool, player: WavPlayer, use_led: bool, led: Optional["LEDBlinker"]):
+def say_filler(isfiller: bool, player: WavPlayer, use_led: bool, led: Optional["LEDBlinker"], use_motor: bool, motor: Optional["Motor"]):
     if isfiller:
         if use_led and led:
             led.start_blink()
+        if use_motor and motor:
+            motor.tilt_kyoro_kyoro(45, 90, 0.5, 2)
         player.random_play(block=False)
         print("filler再生中")
 
