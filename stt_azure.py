@@ -1,7 +1,7 @@
 import os
+import threading
 from typing import Optional
 import azure.cognitiveservices.speech as speechsdk
-
 
 class AzureSpeechToText:
     def __init__(self, language: str = "ja-JP", subscription: Optional[str] = None,
@@ -12,74 +12,117 @@ class AzureSpeechToText:
         if not self.subscription or not self.region:
             raise RuntimeError("Azure Speech の認証情報(SPEECH_KEY / SPEECH_REGION)が未設定です。")
 
-        # 設定
         self.speech_config = speechsdk.SpeechConfig(
             subscription=self.subscription,
             region=self.region,
         )
         self.speech_config.speech_recognition_language = self.language
 
-        # マイク設定（デフォルトまたは指定デバイス）
+        # 終了サイレンスを短めに（確定を早く出す）
+        # 300〜700ms 程度で調整してみてください
+        self.speech_config.set_property(
+            speechsdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, "500"
+        )
+        # 先頭無音の許容（長すぎると開始が遅く見える）
+        self.speech_config.set_property(
+            speechsdk.PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs, "3000"
+        )
+
+        # マイク設定
         if device_id is None:
             self.audio_config = speechsdk.audio.AudioConfig(use_default_microphone=True)
         else:
             self.audio_config = speechsdk.audio.AudioConfig(device_id=device_id)
 
-    def listen_once(self, timeout_sec: float = 15.0) -> str:
-        """
-        1回の発話を認識し、確定テキストを返す（ブロッキング）。
-        """
-        # 無音タイムアウト（先頭無音）
-        try:
-            self.speech_config.set_property(
-                speechsdk.PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs,
-                str(int(timeout_sec * 1000)),
-            )
-        except Exception:
-            pass
-
-        recognizer = speechsdk.SpeechRecognizer(
+        # recognizer は使い回す
+        self.recognizer = speechsdk.SpeechRecognizer(
             speech_config=self.speech_config,
             audio_config=self.audio_config,
         )
-        try:
-            # 中間結果（逐次）
-            recognizer.recognizing.connect(lambda evt: print("中間:", evt.result.text))
-            # 確定結果（分節ごと）
-            recognizer.recognized.connect(lambda evt: print("確定:", evt.result.text))
-            # セッション開始/終了・エラー
-            recognizer.session_started.connect(lambda evt: print("=== 認識開始 ==="))
-            recognizer.session_stopped.connect(lambda evt: print("=== 認識終了 ==="))
-            recognizer.canceled.connect(lambda evt: print("キャンセル:", evt.reason, evt.error_details or ""))
-            
-            result = recognizer.recognize_once_async().get()
-        except Exception as e:
-            print(f"Azure STT エラー: {e}")
-            return ""
 
-        reason = getattr(result, "reason", None)
-        if reason == speechsdk.ResultReason.RecognizedSpeech:
-            return result.text or ""
-        elif reason == speechsdk.ResultReason.NoMatch:
-            return ""
-        elif reason == speechsdk.ResultReason.Canceled:
-            details = speechsdk.CancellationDetails.from_result(result)
-            print(f"Azure STT キャンセル: {details.reason}, {details.error_details or ''}")
-            return ""
-        return ""
+        # 事前に接続を開いておく（初回の遅延対策）
+        self.connection = speechsdk.Connection.from_recognizer(self.recognizer)
+
+    def listen_once_fast(self, print_interim: bool = True, session_timeout_sec: float = 15.0) -> str:
+        """
+        連続認識で最初の確定が来たら即停止して返す。
+        """
+        result_text = {"text": ""}  # クロージャで書き換えたいのでdictで包む
+        done = threading.Event()
+
+        def on_recognizing(evt):
+            if print_interim:
+                print("中間:", evt.result.text)
+
+        def on_recognized(evt):
+            # 最初の確定を受けたら即停止して返す
+            if evt.result.reason == speechsdk.ResultReason.RecognizedSpeech:
+                print("確定:", evt.result.text)
+                result_text["text"] = evt.result.text or ""
+                # 停止をキック（非同期停止）
+                self.recognizer.stop_continuous_recognition_async()
+                done.set()
+
+        def on_canceled(evt):
+            print("キャンセル:", evt.reason, evt.error_details or "")
+            self.recognizer.stop_continuous_recognition_async()
+            done.set()
+
+        def on_session_stopped(evt):
+            print("=== 認識終了 ===")
+
+        # ハンドラ登録
+        self.recognizer.recognizing.connect(on_recognizing)
+        self.recognizer.recognized.connect(on_recognized)
+        self.recognizer.canceled.connect(on_canceled)
+        self.recognizer.session_started.connect(lambda evt: print("=== 認識開始 ==="))
+        self.recognizer.session_stopped.connect(on_session_stopped)
+
+        try:
+            # 事前に接続オープン（true: 自動再接続あり）
+            self.connection.open(True)
+
+            # 連続認識スタート
+            self.recognizer.start_continuous_recognition_async().get()
+
+            # 最初の確定 or タイムアウトまで待機
+            if not done.wait(timeout=session_timeout_sec):
+                # タイムアウトしたら停止
+                self.recognizer.stop_continuous_recognition_async().get()
+                return ""
+            return result_text["text"]
+        finally:
+            # ハンドラを外しておく（重複防止）
+            try:
+                self.recognizer.recognizing.disconnect_all()
+                self.recognizer.recognized.disconnect_all()
+                self.recognizer.canceled.disconnect_all()
+                self.recognizer.session_started.disconnect_all()
+                self.recognizer.session_stopped.disconnect_all()
+            except Exception:
+                pass
+
+    # 既存APIを残したい場合は中で fast を呼ぶ
+    def listen_once(self, timeout_sec: float = 15.0) -> str:
+        return self.listen_once_fast(print_interim=True, session_timeout_sec=timeout_sec)
 
     def warm_up(self):
-        """初期化の肩慣らし（任意）。"""
-        return None
+        """コネクションだけ先に開いておくと初回の待ちが軽くなる"""
+        try:
+            self.connection.open(True)
+        except Exception as e:
+            print("warm_up error:", e)
 
     def close(self):
-        """Azure SDK はGCで解放されるため、ここでは特に何もしない。"""
-        return None
-
+        try:
+            self.connection.close()
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     stt = AzureSpeechToText()
     try:
+        stt.warm_up()
         print("--- 発話してください ---")
         text = stt.listen_once()
         print("確定:", text)

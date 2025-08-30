@@ -193,7 +193,7 @@ async def stream_audio_and_receive_response():
             "type": "session.update",
             "session": {
                 "modalities": ["audio", "text"],
-                "instructions": "あなたはガンダムに出てくるハロです。ハロは片言で話します。短く話します。",
+                "instructions": "あなたはガンダムに出てくるハロです。ハロは片言で話します。短く話します。1文または2文で返してください。例：ハロ、わかった。今日、なにする？",
                 "voice": "cedar",
                 "turn_detection": {"type": "none"}
             }
