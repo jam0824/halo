@@ -161,6 +161,12 @@ class Motor:
         )
         self._tilt_thread.start()
 
+    def motor_kuchipaku(self):
+        """
+        口パク時に呼ぶ
+        """
+        self.tilt_kyoro_kyoro(135, self.TILT_START_ANGLE, 0.5, 2)
+
 
 if __name__ == "__main__":
     with Motor() as motor:

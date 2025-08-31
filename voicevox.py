@@ -190,7 +190,7 @@ class VoiceVoxTTS:
 
     def _motor_tilt(self):
         if self.isMotor and self.motor is not None:
-            self.motor.tilt_kyoro_kyoro(135, 90, 0.5, 2)
+            self.motor.motor_kuchipaku()
             print("おしゃべり用モーター稼働")
 
     @staticmethod

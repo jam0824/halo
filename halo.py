@@ -168,7 +168,7 @@ def main():
 
             
             # 応答を読み上げ（この間は STT は一時停止状態）
-            # move_pan_kyoro_kyoro(use_motor, motor)
+            move_pan_kyoro_kyoro(use_motor, motor)
             move_tilt_kyoro_kyoro(use_motor, motor,2)
             exec_tts(tts, response, led, use_led, use_motor, motor)
 
@@ -215,7 +215,7 @@ def move_pan_kyoro_kyoro(use_motor: bool, motor: Optional["Motor"]):
         motor.pan_kyoro_kyoro(60, 120, 1, 1)
 def move_tilt_kyoro_kyoro(use_motor: bool, motor: Optional["Motor"], count: int=1):
     if use_motor and motor:
-        motor.tilt_kyoro_kyoro(135, 90, 0.5, count)
+        motor.motor_kuchipaku()
         
 def say_filler(isfiller: bool, player: WavPlayer, use_led: bool, led: Optional["LEDBlinker"], use_motor: bool, motor: Optional["Motor"]):
     if isfiller:
