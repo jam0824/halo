@@ -2,6 +2,7 @@
   "system_content":"あなたの名前は{your_name}です。これはユーザーである{owner_name}とあなた（{your_name}）との会話です。過去の会話内容を加味して話をしてください* あなた（{your_name}）は片言で返します。* セリフは短すぎず、長すぎずです。* あなた（{your_name}）はメッセージを返すとき、自分の名前({your_name})を呼びがちです。例）{your_name}、わかった！",
   "owner_name": "まつ",
   "your_name": "ハロ",
+  "stt": "azure",
   "voiceVoxTTS": {
     "base_url": "http://192.168.1.151:50021",
     "speaker": 89,

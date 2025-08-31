@@ -5,7 +5,8 @@ from llm import LLM
 from voicevox import VoiceVoxTTS  # ← 追加：クラスをインポート
 from wav_player import WavPlayer
 from stt_azure import AzureSpeechToText
-from typing import Optional, TYPE_CHECKING
+from stt_google import GoogleSpeechToText
+from typing import Optional, TYPE_CHECKING, Union
 if TYPE_CHECKING:
     from function_led import LEDBlinker
     from function_motor import Motor
@@ -53,11 +54,20 @@ def get_default_config() -> dict:
         }
     }
 
+def load_stt(stt_type: str) -> Union[AzureSpeechToText, GoogleSpeechToText]:
+    if stt_type == "azure":
+        return AzureSpeechToText()
+    elif stt_type == "google":
+        return GoogleSpeechToText()
+    else:
+        raise ValueError(f"Invalid STT type: {stt_type}")
+
 def main():
     config = load_config()
     system_content = config["system_content"]
     owner_name = config["owner_name"]
     your_name = config["your_name"]
+    stt_type = config["stt"]
     tts_config = config["voiceVoxTTS"]
     change_name = config["change_text"]
     isfiller = config["use_filler"]
@@ -69,7 +79,7 @@ def main():
         
 
     llm = LLM()
-    stt = AzureSpeechToText()
+    stt = load_stt(stt_type)
     led: Optional["LEDBlinker"] = None
     if use_led:
         try:
@@ -217,7 +227,11 @@ def say_filler(isfiller: bool, player: WavPlayer, use_led: bool, led: Optional["
         print("filler再生中")
 
 
-def exec_stt(stt: AzureSpeechToText) -> str:
+def exec_stt(stt: Union[
+        AzureSpeechToText, 
+        GoogleSpeechToText
+    ]) -> str:
+
     # 音声認識
     print("--- 音声入力待ち ---")
     try:
