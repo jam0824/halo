@@ -1,4 +1,4 @@
-import RPi.GPIO as GPIO
+import pigpio
 from time import sleep
 import threading
 
@@ -6,21 +6,25 @@ import threading
 class Motor:
     PAN_START_ANGLE = 90
     TILT_START_ANGLE = 90
-    def __init__(self, pan_pin:int = 4, tilt_pin:int = 17, frequency:int = 50):
+    def __init__(self, pan_pin:int = 12, tilt_pin:int = 25, frequency:int = 50, invert_pan:bool=False, invert_tilt:bool=False):
         self.pan_pin = pan_pin
         self.tilt_pin = tilt_pin
-        self.frequency = frequency
-        self.cycle = 1000/frequency
+        self.frequency = frequency  # pigpioのset_servo_pulsewidthは周波数指定不要
+        # サーボ用パルス幅(us)
+        self._min_pulse_us = 500
+        self._max_pulse_us = 2500
+        self._min_angle = 0.0
+        self._max_angle = 180.0
+        self._invert_pan = bool(invert_pan)
+        self._invert_tilt = bool(invert_tilt)
         self._cleaned = False
         self._pan_thread: threading.Thread | None = None
         self._tilt_thread: threading.Thread | None = None
         self._pan_stop_event = threading.Event()
         self._tilt_stop_event = threading.Event()
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(self.pan_pin, GPIO.OUT)
-        GPIO.setup(self.tilt_pin, GPIO.OUT)
-        self.pan_pwm = GPIO.PWM(self.pan_pin, self.frequency)
-        self.tilt_pwm = GPIO.PWM(self.tilt_pin, self.frequency)
+        self.pi = pigpio.pi()
+        if not self.pi.connected:
+            raise RuntimeError("pigpio daemon (pigpiod) に接続できませんでした。pigpiod を起動してください。")
         self.init_position(self.PAN_START_ANGLE, self.TILT_START_ANGLE)
     
     def __del__(self):
@@ -43,15 +47,16 @@ class Motor:
         except Exception:
             pass
         try:
-            self.pan_pwm.stop()
+            # サーボ信号を停止
+            self.pi.set_servo_pulsewidth(self.pan_pin, 0)
         except Exception:
             pass
         try:
-            self.tilt_pwm.stop()
+            self.pi.set_servo_pulsewidth(self.tilt_pin, 0)
         except Exception:
             pass
         try:
-            GPIO.cleanup()
+            self.pi.stop()
         except Exception:
             pass
         self._cleaned = True
@@ -64,22 +69,23 @@ class Motor:
         return False
         
     def init_position(self, pan_angle:float=0, tilt_angle:float=0):
-        self.pan_pwm.start(self.get_motor_duty(pan_angle))
-        self.tilt_pwm.start(self.get_motor_duty(pan_angle))
-
-    def get_motor_ms(self, angle:float) -> float:
-        x = (360 - angle) / 180
-        return x
-
-    def get_motor_duty(self, angle:float) -> float:
-        duty_per = self.get_motor_ms(angle) / self.cycle * 100
-        return duty_per
+        self.change_pan_angle(pan_angle)
+        self.change_tilt_angle(tilt_angle)
+    def _angle_to_pulsewidth(self, angle:float) -> int:
+        # 角度を安全にクリップ
+        a = max(self._min_angle, min(self._max_angle, float(angle)))
+        span_us = self._max_pulse_us - self._min_pulse_us
+        span_deg = self._max_angle - self._min_angle
+        pw = self._min_pulse_us + (a - self._min_angle) * span_us / span_deg
+        return int(round(pw))
     
     def change_pan_angle(self, angle:float):
-        self.pan_pwm.ChangeDutyCycle(self.get_motor_duty(angle))
+        adj = (self._max_angle - float(angle)) if self._invert_pan else float(angle)
+        self.pi.set_servo_pulsewidth(self.pan_pin, self._angle_to_pulsewidth(adj))
     
     def change_tilt_angle(self, angle:float):
-        self.tilt_pwm.ChangeDutyCycle(self.get_motor_duty(angle))
+        adj = (self._max_angle - float(angle)) if self._invert_tilt else float(angle)
+        self.pi.set_servo_pulsewidth(self.tilt_pin, self._angle_to_pulsewidth(adj))
 
     def pan_to_start_position(self):
         self.change_pan_angle(self.PAN_START_ANGLE)
@@ -163,16 +169,17 @@ if __name__ == "__main__":
         print("pan_kyoro_kyoro")
         motor.pan_kyoro_kyoro(60, 120, 1, 1)
         print("tilt_kyoro_kyoro")
-        motor.tilt_kyoro_kyoro(45, 90, 0.5, 5)
-        sleep(5)
-        print("tilt0")
-        motor.change_tilt_angle(0)
+        motor.tilt_kyoro_kyoro(135, 90, 0.5, 5)
         sleep(5)
         print("tilt90")
         motor.change_tilt_angle(90)
         sleep(5)
+        print("tilt135")
+        motor.change_tilt_angle(135)
+        sleep(5)
+
         print("スタートポジションに戻します")
         motor.pan_to_start_position()
         motor.tilt_to_start_position()
-        
+        sleep(2)
 

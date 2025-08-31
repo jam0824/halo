@@ -215,14 +215,13 @@ def move_pan_kyoro_kyoro(use_motor: bool, motor: Optional["Motor"]):
         motor.pan_kyoro_kyoro(60, 120, 1, 1)
 def move_tilt_kyoro_kyoro(use_motor: bool, motor: Optional["Motor"], count: int=1):
     if use_motor and motor:
-        motor.tilt_kyoro_kyoro(45, 90, 0.5, count)
+        motor.tilt_kyoro_kyoro(135, 90, 0.5, count)
         
 def say_filler(isfiller: bool, player: WavPlayer, use_led: bool, led: Optional["LEDBlinker"], use_motor: bool, motor: Optional["Motor"]):
     if isfiller:
         if use_led and led:
             led.start_blink()
-        if use_motor and motor:
-            motor.tilt_kyoro_kyoro(45, 90, 0.5, 2)
+        move_tilt_kyoro_kyoro(use_motor, motor, 2)
         player.random_play(block=False)
         print("filler再生中")
 
