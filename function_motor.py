@@ -1,4 +1,5 @@
 import pigpio
+import math
 from time import sleep
 import threading
 
@@ -17,6 +18,9 @@ class Motor:
         self._max_angle = 180.0
         self._invert_pan = bool(invert_pan)
         self._invert_tilt = bool(invert_tilt)
+        # 直近に指示した角度を保持（イージングの始点に利用）
+        self._pan_angle: float = float(self.PAN_START_ANGLE)
+        self._tilt_angle: float = float(self.TILT_START_ANGLE)
         self._cleaned = False
         self._pan_thread: threading.Thread | None = None
         self._tilt_thread: threading.Thread | None = None
@@ -81,10 +85,12 @@ class Motor:
     
     def change_pan_angle(self, angle:float):
         adj = (self._max_angle - float(angle)) if self._invert_pan else float(angle)
+        self._pan_angle = float(angle)
         self.pi.set_servo_pulsewidth(self.pan_pin, self._angle_to_pulsewidth(adj))
     
     def change_tilt_angle(self, angle:float):
         adj = (self._max_angle - float(angle)) if self._invert_tilt else float(angle)
+        self._tilt_angle = float(angle)
         self.pi.set_servo_pulsewidth(self.tilt_pin, self._angle_to_pulsewidth(adj))
 
     def pan_to_start_position(self):
@@ -106,16 +112,47 @@ class Motor:
         return stop_event.is_set()
 
     def _pan_worker(self, left_angle:float, right_angle:float, duration:float, count:int=1):
+        """パンのみイージングで左右へ往復する。
+        duration は各移動(左->右, 右->左 など)の所要時間[s]。
+        """
         self._pan_stop_event.clear()
         if self._pan_stop_event.is_set():
             return
+        # 1ステップのスリープ間隔(秒)
+        base_interval = 0.02  # 50Hz程度
+
+        def ease_in_out_sine(t: float) -> float:
+            return 0.5 * (1 - math.cos(math.pi * t))
+
+        def move_ease(start: float, end: float, seconds: float) -> bool:
+            if seconds <= 0:
+                self.change_pan_angle(end)
+                return self._pan_stop_event.is_set()
+            steps = max(1, int(seconds / base_interval))
+            for i in range(1, steps + 1):
+                if self._pan_stop_event.is_set():
+                    return True
+                t = i / steps
+                p = ease_in_out_sine(t)
+                angle = start + (end - start) * p
+                self.change_pan_angle(angle)
+                if self._sleep_with_cancel(base_interval, self._pan_stop_event):
+                    return True
+            return self._pan_stop_event.is_set()
+
+        current = float(self._pan_angle)
         for _ in range(max(1, int(count))):
-            self.change_pan_angle(left_angle)
-            if self._sleep_with_cancel(duration, self._pan_stop_event):
+            if move_ease(current, float(left_angle), float(duration)):
                 return
-            self.change_pan_angle(right_angle)
-            if self._sleep_with_cancel(duration, self._pan_stop_event):
+            current = float(left_angle)
+            if move_ease(current, float(self.PAN_START_ANGLE), float(duration)):
                 return
+            current = float(self.PAN_START_ANGLE)
+            if move_ease(current, float(right_angle), float(duration)):
+                return
+            current = float(right_angle)
+        # 最後にスタート角へ戻す
+        move_ease(current, float(self.PAN_START_ANGLE), float(duration))
 
     def _tilt_worker(self, up_angle:float, down_angle:float, duration:float, count:int=1):
         self._tilt_stop_event.clear()
@@ -165,7 +202,7 @@ class Motor:
         """
         口パク時に呼ぶ
         """
-        self.tilt_kyoro_kyoro(135, self.TILT_START_ANGLE, 0.5, 2)
+        self.tilt_kyoro_kyoro(120, self.TILT_START_ANGLE, 0.5, 2)
 
 
 if __name__ == "__main__":

@@ -168,7 +168,7 @@ def main():
 
             
             # 応答を読み上げ（この間は STT は一時停止状態）
-            move_pan_kyoro_kyoro(use_motor, motor)
+            move_pan_kyoro_kyoro(use_motor, motor, 2, 1)
             move_tilt_kyoro_kyoro(use_motor, motor,2)
             exec_tts(tts, response, led, use_led, use_motor, motor)
 
@@ -210,9 +210,9 @@ def make_history(history: str, name: str, message: str) -> str:
     print(line_text)
     return history
 
-def move_pan_kyoro_kyoro(use_motor: bool, motor: Optional["Motor"]):
+def move_pan_kyoro_kyoro(use_motor: bool, motor: Optional["Motor"], speed: float=1, count: int=1):
     if use_motor and motor:
-        motor.pan_kyoro_kyoro(60, 120, 1, 1)
+        motor.pan_kyoro_kyoro(80, 100, speed, count)
 def move_tilt_kyoro_kyoro(use_motor: bool, motor: Optional["Motor"], count: int=1):
     if use_motor and motor:
         motor.motor_kuchipaku()
@@ -222,6 +222,7 @@ def say_filler(isfiller: bool, player: WavPlayer, use_led: bool, led: Optional["
         if use_led and led:
             led.start_blink()
         move_tilt_kyoro_kyoro(use_motor, motor, 2)
+        move_pan_kyoro_kyoro(use_motor, motor, 1, 2)
         player.random_play(block=False)
         print("filler再生中")
 
