@@ -9,6 +9,7 @@ import requests
 import simpleaudio as sa
 if TYPE_CHECKING:
     from function_led import LEDBlinker
+    from function_motor import Motor
 
 
 class VoiceVoxTTS:
@@ -43,7 +44,7 @@ class VoiceVoxTTS:
             "speedScale": 1.0,
             "pitchScale": 0.0,
             "intonationScale": 1.0,
-            "volumeScale": 1.0,
+            "volumeScale": 1.5,
             "prePhonemeLength": 0.1,
             "postPhonemeLength": 0.1,
             "enableInterrogativeUpspeak": True,
@@ -65,12 +66,14 @@ class VoiceVoxTTS:
         """例: set_params(speedScale=1.1, pitchScale=-0.2)"""
         self.params.update(kwargs)
 
-    def speak(self, text: str, led: Optional["LEDBlinker"], isLed: bool):
+    def speak(self, text: str, led: Optional["LEDBlinker"], isLed: bool, motor: Optional["Motor"], isMotor: bool):
         """
         同期実行：合成＆再生を行い、完了（または stop()）まで戻らない。
         """
         self.led = led
         self.isLed = isLed
+        self.motor = motor
+        self.isMotor = isMotor
         self._stop_event.clear()
         chunks = self._split_into_chunks(text, self.max_len)
         q: "queue.Queue" = queue.Queue(maxsize=self.queue_size)
@@ -172,6 +175,7 @@ class VoiceVoxTTS:
         with wave.open(BytesIO(wav_bytes), "rb") as wf:
             wav = sa.WaveObject.from_wave_read(wf)
         self._led_start_blink()
+        self._motor_tilt()
         self._play_obj = wav.play()
     
     def _led_start_blink(self):
@@ -183,6 +187,11 @@ class VoiceVoxTTS:
         if self.isLed and self.led is not None:
             self.led.stop_blink()
             print("LED 点滅終了")
+
+    def _motor_tilt(self):
+        if self.isMotor and self.motor is not None:
+            self.motor.tilt_kyoro_kyoro(45, 90, 0.5, 2)
+            print("おしゃべり用モーター稼働")
 
     @staticmethod
     def _drain_queue(q: "queue.Queue"):

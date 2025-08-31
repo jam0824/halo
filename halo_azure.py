@@ -138,7 +138,7 @@ def main():
             history = make_history(history, owner_name, user_text)
 
             # バイバイの場合
-            if is_ferewell(user_text, tts, led, use_led, your_name):
+            if is_ferewell(user_text, tts, led, use_led, use_motor, motor, your_name):
                 break
             
             # fillerを再生する場合
@@ -160,7 +160,7 @@ def main():
             # 応答を読み上げ（この間は STT は一時停止状態）
             move_pan_kyoro_kyoro(use_motor, motor)
             move_tilt_kyoro_kyoro(use_motor, motor,2)
-            exec_tts(tts, response, led, use_led)
+            exec_tts(tts, response, led, use_led, use_motor, motor)
 
             print(f"=== ループ {loop_count} 完了 ===")
 
@@ -183,13 +183,13 @@ def main():
                 motor.clean_up()
         except: pass
 
-def is_ferewell(user_text: str, tts: VoiceVoxTTS, led: Optional["LEDBlinker"], use_led: bool, your_name: str) -> bool:
+def is_ferewell(user_text: str, tts: VoiceVoxTTS, led: Optional["LEDBlinker"], use_led: bool, use_motor: bool, motor: Optional["Motor"], your_name: str) -> bool:
     if not check_end_command(user_text):
         return False
     farewell = "バイバイ！"
     print(f"{your_name}: {farewell}")
     try:
-        tts.speak(farewell, led, use_led)
+        tts.speak(farewell, led, use_led, motor, use_motor)
     except Exception as e:
         print(f"TTSでエラーが発生しました: {e}")
     return True
@@ -232,9 +232,9 @@ def check_end_command(user_text: str) -> bool:
         return True
     return False
 
-def exec_tts(tts: VoiceVoxTTS, text: str, led: Optional["LEDBlinker"], isLed: bool):
+def exec_tts(tts: VoiceVoxTTS, text: str, led: Optional["LEDBlinker"], isLed: bool, use_motor: bool, motor: Optional["Motor"]):
     try:
-        tts.speak(text, led, isLed)
+        tts.speak(text, led, isLed, motor, use_motor)
     except KeyboardInterrupt:
         tts.stop()
         print("\n読み上げを中断しました。")
