@@ -44,7 +44,7 @@ class VoiceVoxTTS:
             "speedScale": 1.0,
             "pitchScale": 0.0,
             "intonationScale": 1.0,
-            "volumeScale": 1.5,
+            "volumeScale": 2.0,
             "prePhonemeLength": 0.1,
             "postPhonemeLength": 0.1,
             "enableInterrogativeUpspeak": True,

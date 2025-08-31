@@ -168,7 +168,7 @@ def main():
 
             
             # 応答を読み上げ（この間は STT は一時停止状態）
-            move_pan_kyoro_kyoro(use_motor, motor)
+            # move_pan_kyoro_kyoro(use_motor, motor)
             move_tilt_kyoro_kyoro(use_motor, motor,2)
             exec_tts(tts, response, led, use_led, use_motor, motor)
 
