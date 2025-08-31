@@ -2,6 +2,7 @@ import queue
 import re
 import sys
 import time
+import threading
 from typing import Optional
 
 from google.cloud import speech
@@ -16,6 +17,27 @@ CHUNK = int(RATE / 10)  # 100ms
 class MicrophoneStream:
     """Opens a recording stream as a generator yielding the audio chunks."""
 
+    # PyAudio を共有し、再生成を避ける
+    _shared_audio_interface: Optional[pyaudio.PyAudio] = None
+    _shared_lock = threading.Lock()
+
+    @classmethod
+    def _get_shared_interface(cls) -> pyaudio.PyAudio:
+        with cls._shared_lock:
+            if cls._shared_audio_interface is None:
+                cls._shared_audio_interface = pyaudio.PyAudio()
+            return cls._shared_audio_interface
+
+    @classmethod
+    def terminate_shared(cls) -> None:
+        with cls._shared_lock:
+            if cls._shared_audio_interface is not None:
+                try:
+                    cls._shared_audio_interface.terminate()
+                except Exception:
+                    pass
+                cls._shared_audio_interface = None
+
     def __init__(self: object, rate: int = RATE, chunk: int = CHUNK) -> None:
         """The audio -- and generator -- is guaranteed to be on the main thread."""
         self._rate = rate
@@ -26,7 +48,8 @@ class MicrophoneStream:
         self.closed = True
 
     def __enter__(self: object) -> object:
-        self._audio_interface = pyaudio.PyAudio()
+        # 共有PyAudioインスタンスを使用
+        self._audio_interface = self._get_shared_interface()
         self._audio_stream = self._audio_interface.open(
             format=pyaudio.paInt16,
             # The API currently only supports 1-channel (mono) audio
@@ -58,7 +81,7 @@ class MicrophoneStream:
         # Signal the generator to terminate so that the client's
         # streaming_recognize method will not block the process termination.
         self._buff.put(None)
-        self._audio_interface.terminate()
+        # 共有インスタンスはここでは終了しない
 
     def _fill_buffer(
         self: object,
