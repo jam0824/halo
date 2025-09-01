@@ -4,9 +4,22 @@ import pyaudio
 import numpy as np
 import base64
 import json
-import wave
-import io
 import os
+import re
+import time
+from voicevox import VoiceVoxTTS
+from typing import Optional, TYPE_CHECKING
+if TYPE_CHECKING:
+    from function_led import LEDBlinker
+    from function_motor import Motor
+
+tts = VoiceVoxTTS(
+    base_url="http://192.168.1.151:50021",
+    speaker=89,
+    max_len=80,
+    queue_size=4,
+)
+tts.set_params(speedScale=1.0, pitchScale=0.0, intonationScale=1.0)
 
 API_KEY = os.environ.get('OPENAI_API_KEY')
 #わからない人は、上の行をコメントアウトして、下記のように直接API KEYを書き下してもよい
@@ -19,20 +32,7 @@ HEADERS = {
     "OpenAI-Beta": "realtime=v1"
 }
 
-# PCM16形式に変換する関数
-def base64_to_pcm16(base64_audio):
-    audio_data = base64.b64decode(base64_audio)
-    return audio_data
-
-# 簡易VAD（RMSベース）
-def is_voice(pcm16_bytes: bytes, threshold: float = 500.0) -> bool:
-    if not pcm16_bytes:
-        return False
-    data = np.frombuffer(pcm16_bytes, dtype=np.int16)
-    if data.size == 0:
-        return False
-    rms = np.sqrt(np.mean(np.square(data.astype(np.float32))))
-    return rms >= threshold
+ 
 
 # 音声を送信する非同期関数（VADで区切ってcommit→response.createを送る）
 async def send_audio(websocket, stream, CHUNK, RATE, mic_enabled_event: asyncio.Event, awaiting_response: asyncio.Event):
@@ -51,12 +51,7 @@ async def send_audio(websocket, stream, CHUNK, RATE, mic_enabled_event: asyncio.
             return None
 
     print("マイクから音声を取得して送信中...")
-    # VADパラメータ
-    voice_started = False
-    silence_ms_after_voice = 0.0
-    chunk_ms = 1000.0 * CHUNK / RATE
-    speech_ms = 0.0
-    min_speech_ms = 250.0  # 最低発話長（誤起動抑制）
+
 
     while True:
         # アシスタント再生中は送信停止
@@ -88,99 +83,47 @@ async def send_audio(websocket, stream, CHUNK, RATE, mic_enabled_event: asyncio.
 
         # WebSocketで音声データを送信
         await websocket.send(json.dumps(audio_event))
-
-        # 簡易VAD: 音声開始→終了でcommitし、応答生成を起動
-        if not voice_started:
-            if is_voice(audio_data):
-                voice_started = True
-                silence_ms_after_voice = 0.0
-                speech_ms = 0.0
-        else:
-            if is_voice(audio_data):
-                silence_ms_after_voice = 0.0
-                speech_ms += chunk_ms
-            else:
-                silence_ms_after_voice += chunk_ms
-
-            # 800ms程度の無音で区切る + 最低発話長 + 応答未待機
-            if silence_ms_after_voice >= 800.0 and speech_ms >= min_speech_ms and not awaiting_response.is_set():
-                # 1ターンの音声を確定
-                await websocket.send(json.dumps({"type": "input_audio_buffer.commit"}))
-                # 応答生成をリクエスト
-                await websocket.send(json.dumps({"type": "response.create"}))
-                # アシスタントが話す間はマイク停止
-                mic_enabled_event.clear()
-                # 物理的にも入力を止める
-                try:
-                    if stream.is_active():
-                        stream.stop_stream()
-                except Exception:
-                    pass
-                awaiting_response.set()
-                # 状態リセット（次ターンのため）
-                voice_started = False
-                silence_ms_after_voice = 0.0
-                speech_ms = 0.0
+        
 
         await asyncio.sleep(0)
 
-# サーバーから音声を受信して再生する非同期関数
-async def receive_audio(websocket, output_stream, input_stream, mic_enabled_event: asyncio.Event, awaiting_response: asyncio.Event):
-    print("assistant: ", end = "", flush = True)
-    loop = asyncio.get_event_loop()
-    assistant_speaking = False
+# サーバーからの応答を受信して処理する非同期関数（音声再生なし）
+async def receive_audio(websocket, mic_enabled_event: asyncio.Event, awaiting_response: asyncio.Event):
+    _SENT_END = re.compile(r"[。．！？!?]\s*$")  # 文末検出（日本語/記号）
+    buf = ""
+    print("assistant: ", end="", flush=True)
     while True:
         # サーバーからの応答を受信
         response = await websocket.recv()
         response_data = json.loads(response)
 
         # サーバーからの応答をリアルタイム（ストリーム）で表示
-        if "type" in response_data and response_data["type"] == "response.audio_transcript.delta":
-            print(response_data["delta"], end = "", flush = True)
-        # サーバからの応答が完了したことを取得（テキストの区切り）
-        elif "type" in response_data and response_data["type"] == "response.audio_transcript.done":
-            print("\nassistant: ", end = "", flush = True)
-            # 音声が無い応答（テキストのみ）の場合はここで終了扱い
-            if not assistant_speaking:
-                await websocket.send(json.dumps({"type": "input_audio_buffer.clear"}))
-                awaiting_response.clear()
-                mic_enabled_event.set()
+        if response_data.get("type") == "response.audio_transcript.delta":
+            stream_data = response_data["delta"].strip()
+            print(stream_data, end="", flush=True)
+            buf += stream_data
+            if _SENT_END.search(buf) or len(buf) >= tts.max_len:
+                s = buf.strip()
+                if s:
+                    tts.stream_speak(s, None, False, None, False)
+                    buf = ""
 
-        elif "type" in response_data and response_data["type"] == "response.completed":
+        elif response_data.get("type") == "response.completed":
             # 応答完了: サーバ側バッファをクリアし、マイク再開
+            
             await websocket.send(json.dumps({"type": "input_audio_buffer.clear"}))
             awaiting_response.clear()
+            print("マイク再開: response.completed")
             mic_enabled_event.set()
 
-        # サーバーからの応答に音声データが含まれているか確認
-        if "delta" in response_data:
-            if response_data["type"] == "response.audio.delta":
-                base64_audio_response = response_data["delta"]
-                if base64_audio_response:
-                    pcm16_audio = base64_to_pcm16(base64_audio_response)
-                    #音声データがある場合は、出力ストリームから再生
-                    await loop.run_in_executor(None, output_stream.write, pcm16_audio)
-                    if not assistant_speaking:
-                        # 念のためここでもマイクを停止
-                        try:
-                            if input_stream.is_active():
-                                input_stream.stop_stream()
-                        except Exception:
-                            pass
-                    assistant_speaking = True
+        # 出力音声は再生しないため、audio.deltaは無視
 
-        # 音声出力の完了イベント
-        if "type" in response_data and response_data["type"] in ("response.audio.done", "response.completed", "response.output_text.done"):
+        # 出力完了イベント
+        if response_data.get("type") in ("response.audio.done", "response.output_text.done"):
             await websocket.send(json.dumps({"type": "input_audio_buffer.clear"}))
             awaiting_response.clear()
+            print("マイク再開: response.audio.done, response.output_text.done")
             mic_enabled_event.set()
-            assistant_speaking = False
-            # マイク再開
-            try:
-                if not input_stream.is_active():
-                    input_stream.start_stream()
-            except Exception:
-                pass
 
 # マイクからの音声を取得し、WebSocketで送信しながらサーバーからの音声応答を再生する非同期関数
 async def stream_audio_and_receive_response():
@@ -193,7 +136,7 @@ async def stream_audio_and_receive_response():
             "type": "session.update",
             "session": {
                 "modalities": ["audio", "text"],
-                "instructions": "あなたはガンダムに出てくるハロです。ハロは片言で話します。短く話します。1文または2文で返してください。例：ハロ、わかった。今日、なにする？",
+                "instructions": "Please make sure to speak in only one sentence; more than one sentence is not allowed.",
                 "voice": "cedar",
                 "turn_detection": {"type": "none"}
             }
@@ -213,10 +156,7 @@ async def stream_audio_and_receive_response():
         # マイクストリームの初期化
         stream = p.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK)
 
-        # サーバーからの応答音声を再生するためのストリームを初期化
-        output_stream = p.open(format=FORMAT, channels=CHANNELS, rate=RATE, output=True, frames_per_buffer=CHUNK)
-
-        print("マイク入力およびサーバーからの音声再生を開始...")
+        print("マイク入力を開始...")
 
         # マイクON/OFF制御（初期はON）と応答待機フラグ
         mic_enabled_event = asyncio.Event()
@@ -224,9 +164,9 @@ async def stream_audio_and_receive_response():
         awaiting_response = asyncio.Event()
 
         try:
-            # 音声送信タスクと音声受信タスクを非同期で並行実行
+            # 音声送信タスクと応答受信タスクを非同期で並行実行（音声再生なし）
             send_task = asyncio.create_task(send_audio(websocket, stream, CHUNK, RATE, mic_enabled_event, awaiting_response))
-            receive_task = asyncio.create_task(receive_audio(websocket, output_stream, stream, mic_enabled_event, awaiting_response))
+            receive_task = asyncio.create_task(receive_audio(websocket, mic_enabled_event, awaiting_response))
 
             # タスクが終了するまで待機
             await asyncio.gather(send_task, receive_task)
@@ -239,8 +179,6 @@ async def stream_audio_and_receive_response():
             if stream.is_active():
                 stream.stop_stream()
             stream.close()
-            output_stream.stop_stream()
-            output_stream.close()
             p.terminate()
 
 

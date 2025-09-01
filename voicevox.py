@@ -210,11 +210,15 @@ class VoiceVoxTTS:
     
     _SENT_END = re.compile(r"[。．！？!?]\s*$")  # 文末検出（日本語/記号）
 
-    def stream_speak(self, token_iter):
+    def stream_speak(self, token_iter, led: Optional["LEDBlinker"], isLed: bool, motor: Optional["Motor"], isMotor: bool):
         """
         ストリーミング入力（文字列断片のイテレータ）を文単位にまとめて
         でき次第 VOICEVOX で合成→即時再生する。stop() で中断可。
         """
+        self.led = led
+        self.isLed = isLed
+        self.motor = motor
+        self.isMotor = isMotor
         self._stop_event.clear()
         q: "queue.Queue" = queue.Queue(maxsize=self.queue_size)
         STOP = object()
@@ -232,10 +236,12 @@ class VoiceVoxTTS:
                         if s:
                             q.put(("text", s))
                         buf = ""
+                
                 # 取りこぼしがあれば最後に流す
                 tail = buf.strip()
                 if tail:
                     q.put(("text", tail))
+                
             finally:
                 q.put(STOP)
 
