@@ -158,7 +158,7 @@ def main():
             llm_start_time = time.perf_counter()
             try:
                 response = llm.generate_text(user_text, system_content, history)
-                response = response.replace(f"{your_name}:", "") # 名前ラベルが作ったテキストに入ることがあるため削除
+                response = replace_dont_need_word(response, your_name)
                 history = make_history(history, your_name, response)
             except Exception as e:
                 print(f"LLMでエラーが発生しました: {e}")
@@ -258,6 +258,11 @@ def exec_tts(tts: VoiceVoxTTS, text: str, led: Optional["LEDBlinker"], isLed: bo
 def replace_placeholders(text: str, owner_name: str, your_name: str) -> str:
     text = text.replace("{owner_name}", owner_name)
     text = text.replace("{your_name}", your_name)
+    return text
+
+def replace_dont_need_word(text: str, your_name: str) -> str:
+    text = text.replace(f"{your_name}:", "")
+    text = text.replace(f"{your_name}：", "")
     return text
 
 def apply_text_changes(text: str, change_text_config: dict) -> str:

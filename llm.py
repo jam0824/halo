@@ -8,6 +8,7 @@ class LLM:
     def generate_text(self, prompt, system_content, assistant_content):
         resp = self.client.chat.completions.create(
             model="gpt-4o-mini",
+            # model="gpt-4.1-nano",
             messages=[
                 {"role": "system", "content": system_content},
                 {"role": "assistant", "content": assistant_content},
