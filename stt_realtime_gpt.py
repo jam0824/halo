@@ -21,8 +21,7 @@ API_KEY = os.environ.get('OPENAI_API_KEY')
 # WebSocket URLとヘッダー情報
 WS_URL = "wss://api.openai.com/v1/realtime?model=gpt-realtime"
 HEADERS = {
-    "Authorization": "Bearer "+ API_KEY, 
-    "OpenAI-Beta": "realtime=v1"
+    "Authorization": "Bearer "+ API_KEY
 }
 
 
@@ -61,12 +60,12 @@ def get_default_config() -> dict:
         },
         "led":{
             "use_led": True,
-            "led_pin": 17
+            "led_pin": 27
         },
         "motor": {
             "use_motor": True,
             "pan_pin": 4,
-            "tilt_pin": 17
+            "tilt_pin": 25
         }
     }
 
@@ -222,15 +221,7 @@ async def send_audio(websocket, stream, CHUNK, RATE, mic_enabled_event: asyncio.
             # 発話継続中
             silence_ms_after_voice = 0.0
             speech_ms += chunk_ms
-        """
-        # 送信直後にマイクを一時停止
-        mic_enabled_event.clear()
-        try:
-            if stream.is_active():
-                stream.stop_stream()
-        except Exception:
-            pass
-        """
+
         
         
 

@@ -133,7 +133,7 @@ class Motor:
                 if self._pan_stop_event.is_set():
                     return True
                 t = i / steps
-                p = ease_in_out_sine(t)
+                p = t
                 angle = start + (end - start) * p
                 self.change_pan_angle(angle)
                 if self._sleep_with_cancel(base_interval, self._pan_stop_event):
