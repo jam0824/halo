@@ -32,6 +32,84 @@ HEADERS = {
     "OpenAI-Beta": "realtime=v1"
 }
 
+
+
+def load_config(config_path: str = "config.json") -> dict:
+    """設定ファイル（config.json）を読み込む"""
+    try:
+        with open(config_path, 'r', encoding='utf-8') as file:
+            config = json.load(file)
+        return config
+    except FileNotFoundError:
+        print(f"設定ファイル {config_path} が見つかりません。デフォルト設定を使用します。")
+        return get_default_config()
+    except json.JSONDecodeError as e:
+        print(f"設定ファイルの読み込みエラー: {e}。デフォルト設定を使用します。")
+        return get_default_config()
+
+def get_default_config() -> dict:
+    """デフォルト設定を返す"""
+    return {
+        "system_content": "これはユーザーである{owner_name}とあなた（{your_name}）との会話です。{your_name}は片言で返します。セリフは短すぎず、長すぎずです。話を盛り上げようとします。また{your_name}は自分の名前を呼びがちです。けれど同じセリフで2回は自分の名前を言いません。（例）{your_name}、わかった！",
+        "owner_name": "まつ",
+        "your_name": "ハロ",
+        "change_text": {
+            "春": "ハロ"
+        },
+        "llm": "gpt-4o-mini",
+        "voiceVoxTTS": {
+            "base_url": "http://127.0.0.1:50021",
+            "speaker": 89,
+            "max_len": 80,
+            "queue_size": 4,
+            "speedScale": 1.0,
+            "pitchScale": 0.0,
+            "intonationScale": 1.0
+        },
+        "led":{
+            "use_led": True,
+            "led_pin": 17
+        },
+        "motor": {
+            "use_motor": True,
+            "pan_pin": 4,
+            "tilt_pin": 17
+        }
+    }
+
+config = load_config()
+system_content = config["system_content"]
+owner_name = config["owner_name"]
+your_name = config["your_name"]
+stt_type = config["stt"]
+llm_model = config["llm"]
+tts_config = config["voiceVoxTTS"]
+change_name = config["change_text"]
+isfiller = config["use_filler"]
+use_led = config["led"]["use_led"]
+led_pin = config["led"]["led_pin"]
+use_motor = config["motor"]["use_motor"]
+pan_pin = config["motor"]["pan_pin"]
+tilt_pin = config["motor"]["tilt_pin"]
+
+led: Optional["LEDBlinker"] = None
+if use_led:
+    try:
+        from function_led import LEDBlinker  # 遅延インポート
+        led = LEDBlinker(led_pin)
+    except Exception as e:
+        print(f"LED機能を無効化します: {e}")
+        use_led = False
+        led = None
+motor: Optional["Motor"] = None
+if use_motor:
+    try:
+        from function_motor import Motor
+        motor = Motor(pan_pin, tilt_pin)
+    except Exception as e:
+        print(f"モーター機能を無効化します: {e}")
+        use_motor = False
+        motor = None
  
 
 # 音声を送信する非同期関数（VADで区切ってcommit→response.createを送る）
@@ -175,7 +253,7 @@ async def receive_audio(websocket, mic_enabled_event: asyncio.Event, awaiting_re
             if _SENT_END.search(buf) or len(buf) >= tts.max_len:
                 s = buf.strip()
                 if s:
-                    tts.stream_speak(s, None, False, None, False)
+                    tts.stream_speak(s, led, use_led, motor, use_motor)
                     buf = ""
 
         elif response_data.get("type") == "response.completed":
@@ -191,6 +269,7 @@ async def receive_audio(websocket, mic_enabled_event: asyncio.Event, awaiting_re
             print("マイク再開: response.audio_transcript.done")
             awaiting_response.clear()
             mic_enabled_event.set()
+            led.stop_blink()
                 
 
         # 出力完了イベント（ここでは何もしない。completedでのみクリア/再開）
@@ -199,6 +278,8 @@ async def receive_audio(websocket, mic_enabled_event: asyncio.Event, awaiting_re
 
 # マイクからの音声を取得し、WebSocketで送信しながらサーバーからの音声応答を再生する非同期関数
 async def stream_audio_and_receive_response():
+    
+
     # WebSocketに接続
     async with websockets.connect(WS_URL, additional_headers=HEADERS) as websocket:
         print("WebSocketに接続しました。")
