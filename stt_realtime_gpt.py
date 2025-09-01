@@ -13,13 +13,6 @@ if TYPE_CHECKING:
     from function_led import LEDBlinker
     from function_motor import Motor
 
-tts = VoiceVoxTTS(
-    base_url="http://192.168.1.151:50021",
-    speaker=89,
-    max_len=80,
-    queue_size=4,
-)
-tts.set_params(speedScale=1.0, pitchScale=0.0, intonationScale=1.0)
 
 API_KEY = os.environ.get('OPENAI_API_KEY')
 #わからない人は、上の行をコメントアウトして、下記のように直接API KEYを書き下してもよい
@@ -91,6 +84,14 @@ led_pin = config["led"]["led_pin"]
 use_motor = config["motor"]["use_motor"]
 pan_pin = config["motor"]["pan_pin"]
 tilt_pin = config["motor"]["tilt_pin"]
+
+tts = VoiceVoxTTS(
+    base_url=tts_config["base_url"],
+    speaker=89,
+    max_len=80,
+    queue_size=4,
+)
+tts.set_params(speedScale=1.0, pitchScale=0.0, intonationScale=1.0)
 
 led: Optional["LEDBlinker"] = None
 if use_led:
