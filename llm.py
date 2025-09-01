@@ -5,9 +5,10 @@ class LLM:
     def __init__(self):
         self.client = OpenAI()
 
-    def generate_text(self, prompt, system_content, assistant_content):
+    def generate_text(self, default_model, prompt, system_content, assistant_content):
         resp = self.client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=default_model,
+            # model="gpt-4o-mini",
             # model="gpt-4.1-nano",
             messages=[
                 {"role": "system", "content": system_content},

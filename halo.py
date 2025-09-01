@@ -34,6 +34,7 @@ def get_default_config() -> dict:
         "change_text": {
             "春": "ハロ"
         },
+        "llm": "gpt-4o-mini",
         "voiceVoxTTS": {
             "base_url": "http://127.0.0.1:50021",
             "speaker": 89,
@@ -68,6 +69,7 @@ def main():
     owner_name = config["owner_name"]
     your_name = config["your_name"]
     stt_type = config["stt"]
+    llm_model = config["llm"]
     tts_config = config["voiceVoxTTS"]
     change_name = config["change_text"]
     isfiller = config["use_filler"]
@@ -157,7 +159,7 @@ def main():
             print("LLMで応答を生成中...")
             llm_start_time = time.perf_counter()
             try:
-                response = llm.generate_text(user_text, system_content, history)
+                response = llm.generate_text(llm_model, user_text, system_content, history)
                 response = replace_dont_need_word(response, your_name)
                 history = make_history(history, your_name, response)
             except Exception as e:
