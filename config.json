@@ -13,7 +13,7 @@
     "pitchScale": 0.0,
     "intonationScale": 1.0
   },
-  "use_filler": false,
+  "use_filler": true,
   "led":{
     "use_led": false,
     "led_pin": 27

@@ -114,7 +114,7 @@ if use_motor:
 
 # 音声を送信する非同期関数（VADで区切ってcommit→response.createを送る）
 async def send_audio(websocket, stream, CHUNK, RATE, mic_enabled_event: asyncio.Event, awaiting_response: asyncio.Event):
-    def is_voice(pcm16_bytes: bytes, threshold: float = 2000.0) -> bool:
+    def is_voice(pcm16_bytes: bytes, threshold: float = 0.0) -> bool:
         if not pcm16_bytes:
             return False
         data = np.frombuffer(pcm16_bytes, dtype=np.int16)
@@ -280,14 +280,29 @@ async def stream_audio_and_receive_response():
         session_update = {
             "type": "session.update",
             "session": {
-                "modalities": ["audio", "text"],
-                "instructions": "Please make sure to speak in only one sentence; more than one sentence is not allowed.",
-                "voice": "cedar",
-                "turn_detection": {"type": "none"}
+                "type":"realtime",
+                "instructions": system_content.format(owner_name=owner_name, your_name=your_name)
             }
         }
         await websocket.send(json.dumps(session_update))
         print("セッション設定を送信しました。")
+
+        # --- 応答を待って確認する ---
+        while True:
+            msg = await websocket.recv()
+            data = json.loads(msg)
+            etype = data.get("type")
+
+            if etype == "session.updated":
+                print("<< session.updated を受信しました")
+                # 現在有効な session 設定を確認
+                session_info = data.get("session", {})
+                print(json.dumps(session_info, indent=2, ensure_ascii=False))
+                break
+
+            elif etype == "error":
+                print("<< エラー:", data)
+                break
         
         # PyAudioの設定
         CHUNK = 2048          # マイクからの入力データのチャンクサイズ

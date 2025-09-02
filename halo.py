@@ -6,6 +6,7 @@ from voicevox import VoiceVoxTTS  # ← 追加：クラスをインポート
 from wav_player import WavPlayer
 from stt_azure import AzureSpeechToText
 from stt_google import GoogleSpeechToText
+from vad import VAD
 from typing import Optional, TYPE_CHECKING, Union
 if TYPE_CHECKING:
     from function_led import LEDBlinker
@@ -134,6 +135,8 @@ def main():
             loop_count += 1
             print(f"\n=== ループ {loop_count} 開始 ===")
 
+            is_voice()  #VADで音声があるかどうかをチェック
+
             try:
                 stt_start_time = time.perf_counter()
                 user_text = exec_stt(stt)   # ← listen_once() は内部で「一時停止」までやる
@@ -194,6 +197,17 @@ def main():
             if use_motor and 'motor' in locals() and motor:
                 motor.clean_up()
         except: pass
+def is_voice() -> bool:
+    is_voice = VAD.listen_until_voice_webrtc(
+        aggressiveness=3,
+        samplerate=16000,
+        frame_duration_ms=20,
+        device=None,
+        timeout_seconds=None,
+        min_consecutive_speech_frames=8,
+    )
+    print(f"is_voice: {is_voice}")
+    return is_voice
 
 def is_ferewell(user_text: str, tts: VoiceVoxTTS, led: Optional["LEDBlinker"], use_led: bool, use_motor: bool, motor: Optional["Motor"], your_name: str) -> bool:
     if not check_end_command(user_text):
