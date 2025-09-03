@@ -22,7 +22,6 @@ class SendRunClient:
     def send(self, message: str) -> Dict[str, object]:
         """message をPOSTし、結果JSONを返す"""
         self._last_message = message
-        print(f"Sending message: {message} to {self.url}")
         response = self.session.post(self.url, json={"message": message}, timeout=self.timeout)
         try:
             response.raise_for_status()

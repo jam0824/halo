@@ -31,6 +31,12 @@ async def ensure_browser() -> Browser:
             _async_browser.is_connected()
             # キープアライブページが閉じられていたら再作成
             if _keep_alive_page is None or _keep_alive_page.is_closed():
+                print("キープアライブページが閉じられていたので再作成")
+                _async_browser = await _playwright.chromium.launch(
+                    headless=False,  # ウィンドウを表示
+                    channel="chrome",
+                    args=["--disable-blink-features=AutomationControlled"],
+                )
                 _keep_alive_page = await _async_browser.new_page()
                 await _keep_alive_page.goto("about:blank")
             return _async_browser
