@@ -2,6 +2,7 @@ import json
 import re
 from pathlib import Path
 from typing import Dict, List, Optional, Pattern, Tuple
+from playwright.controller_browser import BrowserController
 
 
 class CommandSelector:
@@ -47,6 +48,8 @@ class CommandSelector:
         # key に応じて分岐（初期は print のみ）
         if key == "browser":
             print(f"[selector] browser コマンドを検出: text='{text}'")
+            bc = BrowserController()
+            bc.send_async(text)
         else:
             print(f"[selector] {key} コマンドを検出: text='{text}'")
         return key

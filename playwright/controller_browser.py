@@ -2,7 +2,7 @@ from concurrent.futures import ThreadPoolExecutor, Future
 from typing import Optional, Dict
 import atexit
 
-from send_run import SendRunClient
+from .send_run import SendRunClient
 
 
 class BrowserController:

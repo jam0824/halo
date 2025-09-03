@@ -7,6 +7,7 @@ from wav_player import WavPlayer
 from stt_azure import AzureSpeechToText
 from stt_google import GoogleSpeechToText
 from vad import VAD
+from command_selector import CommandSelector
 from typing import Optional, TYPE_CHECKING, Union
 if TYPE_CHECKING:
     from function_led import LEDBlinker
@@ -80,7 +81,7 @@ def main():
     pan_pin = config["motor"]["pan_pin"]
     tilt_pin = config["motor"]["tilt_pin"]
         
-
+    command_selector = CommandSelector()
     llm = LLM()
     stt = load_stt(stt_type)
     led: Optional["LEDBlinker"] = None
@@ -158,6 +159,8 @@ def main():
             
             # fillerを再生する場合
             say_filler(isfiller, player, use_led, led, use_motor, motor)
+
+            command_selector.select(user_text)
 
             print("LLMで応答を生成中...")
             llm_start_time = time.perf_counter()
