@@ -69,6 +69,7 @@ async def close_browser() -> None:
 
 
 async def run_message(user_message: str) -> str:
+    print(f"Running message: {user_message}")
     # 使い捨てではなく、常駐ブラウザを確保
     browser = await ensure_browser()
 
@@ -91,7 +92,7 @@ async def run_message(user_message: str) -> str:
 
 async def main():
     # デモ用の既定メッセージで実行
-    content = await run_message("グーグルを開いて、ハロを検索して、上位タイトルを5つ教えて")
+    content = await run_message("グーグルでテスターちゃんを検索して最初のページにアクセスして、内容を要約して")
     print("\n--- 実行結果 ---")
     print(content)
     # デモ用途では、任意のキー入力までブラウザを開いたままにする
