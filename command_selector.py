@@ -44,10 +44,12 @@ class CommandSelector:
         if key is None:
             print("[selector] マッチするコマンドがありませんでした")
             return None
-
-        # key に応じて分岐（初期は print のみ）
+        
+        self.exec_command(key, text)
+        return key
+    
+    def exec_command(self, key: str, text: str) -> str:
         if key == "browser":
-            print(f"[selector] browser コマンドを検出: text='{text}'")
             bc = BrowserController()
             bc.send_async(text)
         else:
