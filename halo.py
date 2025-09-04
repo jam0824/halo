@@ -13,6 +13,11 @@ if TYPE_CHECKING:
     from function_led import LEDBlinker
     from function_motor import Motor
 
+def load_system_prompt(system_prompt_path: str = "system_prompt.md") -> str:
+    with open(system_prompt_path, 'r', encoding='utf-8') as file:
+        system_prompt = file.read()
+    return system_prompt
+
 
 def load_config(config_path: str = "config.json") -> dict:
     """設定ファイル（config.json）を読み込む"""
@@ -30,7 +35,6 @@ def load_config(config_path: str = "config.json") -> dict:
 def get_default_config() -> dict:
     """デフォルト設定を返す"""
     return {
-        "system_content": "これはユーザーである{owner_name}とあなた（{your_name}）との会話です。{your_name}は片言で返します。セリフは短すぎず、長すぎずです。話を盛り上げようとします。また{your_name}は自分の名前を呼びがちです。けれど同じセリフで2回は自分の名前を言いません。（例）{your_name}、わかった！",
         "owner_name": "まつ",
         "your_name": "ハロ",
         "change_text": {
@@ -67,7 +71,7 @@ def load_stt(stt_type: str) -> Union[AzureSpeechToText, GoogleSpeechToText]:
 
 def main():
     config = load_config()
-    system_content = config["system_content"]
+    system_content = load_system_prompt()
     owner_name = config["owner_name"]
     your_name = config["your_name"]
     stt_type = config["stt"]
@@ -166,7 +170,7 @@ def main():
             llm_start_time = time.perf_counter()
             try:
                 response = llm.generate_text(llm_model, user_text, system_content, history)
-                response = replace_dont_need_word(response, your_name)
+                response = get_halo_response(response, your_name, command_selector)
                 history = make_history(history, your_name, response)
             except Exception as e:
                 print(f"LLMでエラーが発生しました: {e}")
@@ -283,6 +287,17 @@ def replace_dont_need_word(text: str, your_name: str) -> str:
     text = text.replace(f"{your_name}:", "")
     text = text.replace(f"{your_name}：", "")
     return text
+
+def get_halo_response(text: str, your_name: str, command_selector: CommandSelector) -> str:
+    print(f"text: {text}")
+    response_json = json.loads(text)
+    response = replace_dont_need_word(response_json['message'], your_name)
+    
+    command = response_json['command']
+    if command:
+        for key, value in command.items():
+            command_selector.exec_command(key, value)
+    return response
 
 def apply_text_changes(text: str, change_text_config: dict) -> str:
     """テキスト内に変更対象の文字列があったら、それを変更対象の文字列に置き換えて返すメソッド"""
