@@ -66,7 +66,7 @@ class VoiceVoxTTS:
         """例: set_params(speedScale=1.1, pitchScale=-0.2)"""
         self.params.update(kwargs)
 
-    def speak(self, text: str, led: Optional["LEDBlinker"], isLed: bool, motor: Optional["Motor"], isMotor: bool):
+    def speak(self, text: str, led: Optional["LEDBlinker"], isLed: bool, motor: Optional["Motor"], isMotor: bool, corr_gate=None):
         """
         同期実行：合成＆再生を行い、完了（または stop()）まで戻らない。
         """
@@ -102,10 +102,21 @@ class VoiceVoxTTS:
                 if self._stop_event.is_set():
                     break
                 if tag == "wav":
+                    if corr_gate is not None:
+                        try:
+                            pcm = self._wav_to_int16_mono16k(payload)
+                            corr_gate.publish_farend(pcm)
+                        except Exception:
+                            pass
+                    self._play(payload)
+                    if self._play_obj:
+                        self._play_obj.wait_done()
+                    """
                     self._play(payload)
                     # 合成は並行で進むため、ここは再生終了まで待つ
                     if self._play_obj:
                         self._play_obj.wait_done()
+                    """
 
             # 停止時の後片付け
             with self._suppress_ex():
@@ -177,6 +188,23 @@ class VoiceVoxTTS:
         self._led_start_blink()
         self._motor_tilt()
         self._play_obj = wav.play()
+    
+    def _wav_to_int16_mono16k(self, wav_bytes: bytes):
+        import numpy as np, io, wave
+        with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
+            ch = wf.getnchannels()
+            sr = wf.getframerate()
+            n = wf.getnframes()
+            pcm = np.frombuffer(wf.readframes(n), dtype=np.int16)
+            if ch > 1:
+                pcm = pcm.reshape(-1, ch).mean(axis=1).astype(np.int16)
+        if sr != 16000:
+            import numpy as np
+            ratio = 16000 / sr
+            x_old = np.arange(len(pcm))
+            x_new = np.arange(0, len(pcm), 1/ratio)
+            pcm = np.interp(x_new, x_old, pcm.astype(np.float32)).astype(np.int16)
+        return pcm
     
     def _led_start_blink(self):
         if self.isLed and self.led is not None:

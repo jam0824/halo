@@ -59,13 +59,10 @@ class AzureSpeechToText:
             if evt.result.reason == speechsdk.ResultReason.RecognizedSpeech:
                 print("確定:", evt.result.text)
                 result_text["text"] = evt.result.text or ""
-                # 停止をキック（非同期停止）
-                self.recognizer.stop_continuous_recognition_async()
                 done.set()
 
         def on_canceled(evt):
             print("キャンセル:", evt.reason, evt.error_details or "")
-            self.recognizer.stop_continuous_recognition_async()
             done.set()
 
         def on_session_stopped(evt):
@@ -85,13 +82,13 @@ class AzureSpeechToText:
             # 連続認識スタート
             self.recognizer.start_continuous_recognition_async().get()
 
-            # 最初の確定 or タイムアウトまで待機
-            if not done.wait(timeout=session_timeout_sec):
-                # タイムアウトしたら停止
-                self.recognizer.stop_continuous_recognition_async().get()
-                return ""
+            done.wait(timeout=session_timeout_sec)
             return result_text["text"]
         finally:
+            try:
+                self.recognizer.stop_continuous_recognition_async().get()
+            except Exception:
+                pass
             # ハンドラを外しておく（重複防止）
             try:
                 self.recognizer.recognizing.disconnect_all()

@@ -2,6 +2,7 @@ import sounddevice as sd
 import time
 from typing import Optional
 import webrtcvad
+import numpy as np
 
 class VAD:
     @staticmethod
@@ -12,6 +13,7 @@ class VAD:
         device: Optional[str] = None,
         timeout_seconds: Optional[float] = None,
         min_consecutive_speech_frames: int = 3,
+        corr_gate=None,
     ) -> bool:
         """
         py-webrtcvad を使って、音声(有声)を検出したら True を返す。
@@ -46,13 +48,21 @@ class VAD:
                             return False
                         continue
 
-                    frame_bytes = np_frames.reshape(-1).tobytes()
+                    frame_i16 = np_frames.reshape(-1).astype(np.int16)
+                    frame_bytes = frame_i16.tobytes()
                     try:
                         is_speech = vad.is_speech(frame_bytes, samplerate)
                     except Exception:
                         is_speech = False
 
                     if is_speech:
+                        if corr_gate is not None:
+                            try:
+                                if corr_gate.is_tts_like(frame_i16):
+                                    consecutive_speech = 0
+                                    continue
+                            except Exception:
+                                pass
                         consecutive_speech += 1
                         if consecutive_speech >= min_consecutive_speech_frames:
                             return True
