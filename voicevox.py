@@ -44,7 +44,7 @@ class VoiceVoxTTS:
             "speedScale": 1.0,
             "pitchScale": 0.0,
             "intonationScale": 1.0,
-            "volumeScale": 2.0,
+            "volumeScale": 1.0,
             "prePhonemeLength": 0.1,
             "postPhonemeLength": 0.1,
             "enableInterrogativeUpspeak": True,
@@ -57,6 +57,7 @@ class VoiceVoxTTS:
         # 実行時制御
         self._stop_event = threading.Event()
         self._play_obj: Optional[sa.PlayObject] = None
+        self._is_speaking: bool = False
 
     # --------- 公開API ---------
     def set_speaker(self, speaker: int):
@@ -75,6 +76,7 @@ class VoiceVoxTTS:
         self.motor = motor
         self.isMotor = isMotor
         self._stop_event.clear()
+        self._is_speaking = True
         chunks = self._split_into_chunks(text, self.max_len)
         q: "queue.Queue" = queue.Queue(maxsize=self.queue_size)
         STOP = object()
@@ -128,10 +130,13 @@ class VoiceVoxTTS:
 
         t_p = threading.Thread(target=producer, daemon=True)
         t_c = threading.Thread(target=consumer, daemon=True)
-        t_p.start()
-        t_c.start()
-        t_p.join()
-        t_c.join()
+        try:
+            t_p.start()
+            t_c.start()
+            t_p.join()
+            t_c.join()
+        finally:
+            self._is_speaking = False
 
     def stop(self):
         """進行中の合成・再生を停止（割込み）。"""
@@ -139,6 +144,17 @@ class VoiceVoxTTS:
         with self._suppress_ex():
             if self._play_obj:
                 self._play_obj.stop()
+
+    def is_playing(self) -> bool:
+        """現在読み上げ（合成/再生）中かどうか。"""
+        if self._is_speaking:
+            return True
+        if self._play_obj is not None:
+            try:
+                return self._play_obj.is_playing()
+            except Exception:
+                return False
+        return False
 
     # --------- 内部ユーティリティ ---------
     def _split_into_chunks(self, text: str, max_len: int):
