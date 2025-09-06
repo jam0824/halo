@@ -29,8 +29,13 @@
     "use_vad": false,
     "samplereate": 16000,
     "frame_duration_ms": 20,
-    "min_consecutive_speech_frames": 18,
-    "corr_threshold": 0.35,
-    "max_lag_ms": 100
+    "min_consecutive_speech_frames": 12,
+    "corr_threshold": 0.50,
+    "max_lag_ms": 95
+  },
+  "interrupt_word": ".*(待って|待|そうだ|えっと|いいね|そうそう|終了).*",
+  "warikomi_voice":{
+    "use_warikomi_voice": true,
+    "warikomi_dir": "./warikomi_voice"
   }
 }
