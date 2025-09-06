@@ -1,5 +1,6 @@
 import sounddevice as sd
 import time
+import threading
 from typing import Optional
 import webrtcvad
 import numpy as np
@@ -14,6 +15,7 @@ class VAD:
         timeout_seconds: Optional[float] = None,
         min_consecutive_speech_frames: int = 3,
         corr_gate=None,
+        stop_event: Optional[threading.Event] = None,
     ) -> bool:
         """
         py-webrtcvad を使って、音声(有声)を検出したら True を返す。
@@ -42,6 +44,9 @@ class VAD:
             ) as stream:
                 consecutive_speech = 0
                 while True:
+                    if stop_event is not None and stop_event.is_set():
+                        print("vad thread stop event")
+                        return False
                     np_frames, _ = stream.read(samples_per_frame)
                     if np_frames.size == 0:
                         if timeout_seconds is not None and (time.time() - start_time) >= timeout_seconds:
@@ -59,6 +64,7 @@ class VAD:
                         if corr_gate is not None:
                             try:
                                 if corr_gate.is_tts_like(frame_i16):
+                                    print("TTS由来の音声と判断して無視します。")
                                     consecutive_speech = 0
                                     continue
                             except Exception:

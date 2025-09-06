@@ -24,5 +24,13 @@
   },
   "change_text":{
     "春": "ハロ"
+  },
+  "vad":{
+    "use_vad": false,
+    "samplereate": 16000,
+    "frame_duration_ms": 20,
+    "min_consecutive_speech_frames": 18,
+    "corr_threshold": 0.35,
+    "max_lag_ms": 100
   }
 }
