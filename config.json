@@ -3,6 +3,7 @@
   "your_name": "ハロ",
   "stt": "azure",
   "llm": "gpt-4o-mini",
+  "run_timeout_sec": 120,
   "voiceVoxTTS": {
     "base_url": "http://192.168.1.151:50021",
     "speaker": 89,
