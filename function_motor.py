@@ -198,6 +198,29 @@ class Motor:
         )
         self._tilt_thread.start()
 
+    def stop_motion(self):
+        """
+        実行中のパン/チルトの動作のみを停止する（pigpioのクローズは行わない）。
+        """
+        try:
+            self._pan_stop_event.set()
+            self._tilt_stop_event.set()
+            if self._pan_thread and self._pan_thread.is_alive():
+                self._pan_thread.join(timeout=0.2)
+            if self._tilt_thread and self._tilt_thread.is_alive():
+                self._tilt_thread.join(timeout=0.2)
+        except Exception:
+            pass
+        finally:
+            try:
+                self._pan_stop_event.clear()
+            except Exception:
+                pass
+            try:
+                self._tilt_stop_event.clear()
+            except Exception:
+                pass
+
     def motor_kuchipaku(self):
         """
         口パク時に呼ぶ

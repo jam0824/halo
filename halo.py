@@ -150,13 +150,7 @@ class HaloApp:
                     user_text = self.apply_text_changes(text, self.change_name)
                     self.history = self.make_history(self.history, self.owner_name, user_text)
 
-                    # 音声で終了指示が来た場合は終了
-                    if self.check_end_command(user_text):
-                        farewell = "バイバイ！"
-                        print(f"{self.your_name}: {farewell}")
-                        with self._suppress_ex():
-                            self.tts.speak(farewell, self.led, self.use_led, self.motor, self.use_motor, corr_gate=None)
-                        self.is_running = False
+                    if check_farewell(user_text):
                         break
 
                     print("LLMで応答を生成中...")
@@ -197,16 +191,17 @@ class HaloApp:
                             return
                         print(f"確定: {txt}")
                         self.is_warikomi = False
+
                         # ハロが言った話と似ているか(true : 似てる)
                         if is_similarity_threshold(txt, self.response):
                             return
                         # 文章が破綻していないか(true : 破綻)
                         if is_coherence_threshold(txt, self.coherence_threshold):
                             return
-
                         # 新規の確定が来たら現在のTTSを停止し、最新のもののみ処理
                         with self._suppress_ex():
                             self.tts.stop()
+                        stop_led(); stop_motor()
                         # フィラー再生（確定直後に再生開始）
                         self.say_filler(txt)
                         _clear_queue(self.recognized_queue)
@@ -227,6 +222,7 @@ class HaloApp:
                         print(f"tts中間結果に『{self.interrupt_word}』を検出")
                         with self._suppress_ex():
                             self.tts.stop()
+                        stop_motor()
                         if getattr(self, "warikomi_player", None):
                             try:
                                 self.warikomi_player.random_play(block=False)
@@ -247,6 +243,32 @@ class HaloApp:
                         is_noisy = False
                     if is_noisy:
                         print(f"破綻がしきい値を超えています :txt: {txt} :threshold: {threshold}")
+                        return True
+                    return False
+                
+                # LED停止
+                def stop_led():
+                    if self.use_led and self.led:
+                        with self._suppress_ex():
+                            self.led.stop_blink()
+                    return
+                # モーター停止
+                def stop_motor():
+                    if self.use_motor and self.motor:
+                        with self._suppress_ex():
+                            try:
+                                self.motor.stop_motion()
+                            except Exception:
+                                pass
+                
+                # 終了コマンドチェック
+                def check_farewell(txt: str) -> bool:
+                    if self.check_end_command(txt):
+                        farewell = "バイバイ！"
+                        print(f"{self.your_name}: {farewell}")
+                        with self._suppress_ex():
+                            self.tts.speak(farewell, self.led, self.use_led, self.motor, self.use_motor, corr_gate=None)
+                        self.is_running = False
                         return True
                     return False
                     
@@ -270,6 +292,8 @@ class HaloApp:
                     while self.is_running:
                         try:
                             text = self.exec_stt(self.stt)
+                            if check_farewell(text):
+                                break
                             if text:
                                 print(f"確定: {text}")
                                 with self._suppress_ex():
@@ -326,7 +350,13 @@ class HaloApp:
                 if self.use_motor and self.motor:
                     self.motor.clean_up()
                 if self.use_led and self.led:
-                    self.led.stop_blink()
+                    # 確実にLEDを停止・消灯・解放
+                    self.led.stop_blink(wait=True)
+                    self.led.off()
+                    try:
+                        self.led.cleanup()
+                    except Exception:
+                        pass
 
     # ----------------- 補助メソッド -----------------
     @staticmethod
@@ -459,7 +489,7 @@ class HaloApp:
         # 類似度（ユーザ確定テキスト vs 応答テキストの一部）
         score = 0.0
         try:
-            print(f"類似度計算 :user_text: {user_text} :response: {self.response}")
+            # print(f"類似度計算 :user_text: {user_text} :response: {self.response}")
             score, best_sub = self.similarity.calc_max_substring_similarity(user_text, self.response)
             print(f"類似度: {score * 100:.1f}%  一致抜粋: {best_sub[:80]}")
         except Exception:
