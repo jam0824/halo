@@ -133,7 +133,11 @@ class HaloApp:
 
                 self.move_pan_kyoro_kyoro(2, 1)
                 self.move_tilt_kyoro_kyoro(2)
-                self.exec_tts_with_vad(response)
+                is_vad = self.config["vad"]["use_vad"]
+                if is_vad:
+                    self.exec_tts_with_vad(response)
+                else:
+                    self.exec_tts_no_vad(response)
 
                 print(f"=== ループ {loop_count} 完了 ===")
 
@@ -337,6 +341,9 @@ class HaloApp:
         finally:
             stop_event.set()
             watcher.join(timeout=1.0)
+    
+    def exec_tts_no_vad(self, text: str):
+        self.tts.speak(text, self.led, self.use_led, self.motor, self.use_motor, corr_gate=None)
 
     def get_halo_response(self, text: str) -> str:
         print(f"text: {text}")
