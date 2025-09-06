@@ -14,6 +14,7 @@ from stt_azure import AzureSpeechToText
 from stt_google import GoogleSpeechToText
 from command_selector import CommandSelector
 from corr_gate import CorrelationGate
+from asr_coherence import ASRCoherenceFilter
 
 if TYPE_CHECKING:
     from function_led import LEDBlinker
@@ -40,9 +41,11 @@ class HaloApp:
         self.interrupt_word: str = self.config["interrupt_word"]
         self.interrupt_word_pattern = re.compile(self.interrupt_word)
         self.similarity_threshold: float = self.config["similarity_threshold"]
+        self.coherence_threshold: float = self.config["coherence_threshold"]
         self.command_selector = CommandSelector()
         self.llm = LLM()
         self.stt = self.load_stt(self.stt_type)
+        self.asr_coherence_filter = ASRCoherenceFilter()
 
         self.led: Optional["LEDBlinker"] = None
         if self.use_led:
@@ -157,15 +160,11 @@ class HaloApp:
                         break
 
                     print("LLMで応答を生成中...")
-                    llm_start_time = time.perf_counter()
                     response_text = self.llm.generate_text(self.llm_model, user_text, self.system_content, self.history)
                     self.response = self.get_halo_response(response_text)
                     self.history = self.make_history(self.history, self.your_name, self.response)
-                    llm_end_time = time.perf_counter()
-                    print(f"[LLM latency] {llm_end_time - llm_start_time:.1f} ms")
 
                     
-
                     # 応答読み上げ（割り込みで self.tts.stop() される想定）
                     self.tts.speak(self.response, self.led, self.use_led, self.motor, self.use_motor, corr_gate=corr_gate)
                 except KeyboardInterrupt:
@@ -185,21 +184,11 @@ class HaloApp:
                         txt = getattr(evt.result, "text", "") or ""
                         if txt:
                             print(f"中間: {txt}")
-                        # 中間結果に割り込みワードが含まれる場合は即座にTTSを停止
-                        if self.interrupt_word_pattern.match(txt) and self.tts.is_playing() and not self.is_warikomi:
-                            self.is_warikomi = True
-                            print(f"tts中間結果に『{self.interrupt_word}』を検出")
-                            with self._suppress_ex():
-                                self.tts.stop()
-                            if getattr(self, "warikomi_player", None):
-                                try:
-                                    self.warikomi_player.random_play(block=False)
-                                    print("割り込み時のボイス再生中")
-                                except Exception:
-                                    pass
+                            check_warikomi(txt)    # 割り込みチェック
+                        
                     except Exception:
                         pass
-
+                
                 #音声認識確定時のイベントハンドラ
                 def on_recognized(evt):
                     try:
@@ -208,10 +197,13 @@ class HaloApp:
                             return
                         print(f"確定: {txt}")
                         self.is_warikomi = False
-                        # 確定テキストが前回のハロの発言と似ていた場合ループバックと捉え無視
-                        if self.is_similarity_threshold(txt, self.response):
-                            print(f"類似度がしきい値を超えています :txt: {txt} :response: {self.response}")
+                        # ハロが言った話と似ているか(true : 似てる)
+                        if is_similarity_threshold(txt, self.response):
                             return
+                        # 文章が破綻していないか(true : 破綻)
+                        if is_coherence_threshold(txt, self.coherence_threshold):
+                            return
+
                         # 新規の確定が来たら現在のTTSを停止し、最新のもののみ処理
                         with self._suppress_ex():
                             self.tts.stop()
@@ -221,15 +213,43 @@ class HaloApp:
                         self.recognized_queue.put(txt)
                     except Exception:
                         pass
-
                 def on_canceled(evt):
                     print("STTキャンセル:", getattr(evt, "reason", None))
-
                 def on_session_started(evt):
                     print("=== 連続認識開始 ===")
-
                 def on_session_stopped(evt):
                     print("=== 連続認識終了 ===")
+                    
+                # 割り込みのチェック
+                def check_warikomi(txt: str):
+                    if self.interrupt_word_pattern.match(txt) and self.tts.is_playing() and not self.is_warikomi:
+                        self.is_warikomi = True
+                        print(f"tts中間結果に『{self.interrupt_word}』を検出")
+                        with self._suppress_ex():
+                            self.tts.stop()
+                        if getattr(self, "warikomi_player", None):
+                            try:
+                                self.warikomi_player.random_play(block=False)
+                                print("割り込み時のボイス再生中")
+                            except Exception:
+                                pass
+                
+                # 確定テキストが前回のハロの発言と似ていた場合ループバックと捉え無視
+                def is_similarity_threshold(txt: str, response: str) -> bool:
+                    if self.is_similarity_threshold(txt, response):
+                        print(f"類似度がしきい値を超えています :txt: {txt} :response: {response}")
+                        return True
+                    return False
+                def is_coherence_threshold(txt: str, threshold: float) -> bool:
+                    is_noisy, score = self.asr_coherence_filter.is_noisy(txt, threshold)
+                    # 完全に0の時は文中にハテナがあるなど
+                    if score == 0.0:
+                        is_noisy = False
+                    if is_noisy:
+                        print(f"破綻がしきい値を超えています :txt: {txt} :threshold: {threshold}")
+                        return True
+                    return False
+                    
 
                 rec = self.stt.recognizer
                 recognizing_cb = rec.recognizing.connect(on_recognizing)
@@ -347,7 +367,6 @@ class HaloApp:
             "led": {"use_led": True, "led_pin": 17},
             "motor": {"use_motor": True, "pan_pin": 4, "tilt_pin": 17},
             "vad": {
-                "use_vad": True,
                 "samplereate": 16000,
                 "frame_duration_ms": 20,
                 "min_consecutive_speech_frames": 12,
