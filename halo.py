@@ -1,5 +1,6 @@
 # halo.py
 import json
+import threading
 import time
 from llm import LLM
 from voicevox import VoiceVoxTTS  # ← 追加：クラスをインポート
@@ -8,6 +9,7 @@ from stt_azure import AzureSpeechToText
 from stt_google import GoogleSpeechToText
 from vad import VAD
 from command_selector import CommandSelector
+from corr_gate import CorrelationGate
 from typing import Optional, TYPE_CHECKING, Union
 if TYPE_CHECKING:
     from function_led import LEDBlinker
@@ -140,7 +142,7 @@ def main():
             loop_count += 1
             print(f"\n=== ループ {loop_count} 開始 ===")
 
-            is_voice()  #VADで音声があるかどうかをチェック
+            #is_voice()  #VADで音声があるかどうかをチェック
 
             try:
                 stt_start_time = time.perf_counter()
@@ -171,6 +173,7 @@ def main():
             try:
                 response = llm.generate_text(llm_model, user_text, system_content, history)
                 response = get_halo_response(response, your_name, command_selector)
+                #response = "今日も一日元気に張り切っていこう。本日は晴天なり。"
                 history = make_history(history, your_name, response)
             except Exception as e:
                 print(f"LLMでエラーが発生しました: {e}")
@@ -182,7 +185,9 @@ def main():
             # 応答を読み上げ（この間は STT は一時停止状態）
             move_pan_kyoro_kyoro(use_motor, motor, 2, 1)
             move_tilt_kyoro_kyoro(use_motor, motor,2)
-            exec_tts(tts, response, led, use_led, use_motor, motor)
+            #exec_tts(tts, response, led, use_led, use_motor, motor)
+            
+            exec_tts_with_vad(tts, response, led, use_led, use_motor, motor)
 
             print(f"=== ループ {loop_count} 完了 ===")
 
@@ -222,7 +227,7 @@ def is_ferewell(user_text: str, tts: VoiceVoxTTS, led: Optional["LEDBlinker"], u
     farewell = "バイバイ！"
     print(f"{your_name}: {farewell}")
     try:
-        tts.speak(farewell, led, use_led, motor, use_motor)
+        tts.speak(farewell, led, use_led, motor, use_motor, corr_gate=None)
     except Exception as e:
         print(f"TTSでエラーが発生しました: {e}")
     return True
@@ -271,12 +276,44 @@ def check_end_command(user_text: str) -> bool:
 
 def exec_tts(tts: VoiceVoxTTS, text: str, led: Optional["LEDBlinker"], isLed: bool, use_motor: bool, motor: Optional["Motor"]):
     try:
-        tts.speak(text, led, isLed, motor, use_motor)
+        tts.speak(text, led, isLed, motor, use_motor, corr_gate=None)
     except KeyboardInterrupt:
         tts.stop()
         print("\n読み上げを中断しました。")
     except Exception as e:
         print(f"TTSでエラーが発生しました: {e}")
+
+def exec_tts_with_vad(tts: VoiceVoxTTS, text: str, led: Optional["LEDBlinker"], isLed: bool, use_motor: bool, motor: Optional["Motor"]):
+    print(f"exec_tts_with_vad: {text}")
+    corr_gate = CorrelationGate(
+        sample_rate=16000,
+        frame_ms=20,
+        buffer_sec=3.0,
+        corr_threshold=0.60,
+        max_lag_ms=95,
+    )
+    def _vad_watcher():
+        ok = VAD.listen_until_voice_webrtc(
+            aggressiveness=3, samplerate=16000, frame_duration_ms=20,
+            device=None, timeout_seconds=None, min_consecutive_speech_frames=12,
+            corr_gate=corr_gate,
+        )
+        if ok:
+            print("割り込み : VADで音声が検出されました。")
+            tts.stop()
+
+    watcher = threading.Thread(target=_vad_watcher, daemon=True)
+    watcher.start()
+    try:
+        tts.speak(text, led, isLed, motor, use_motor, corr_gate=corr_gate)
+    except KeyboardInterrupt:
+        tts.stop()
+        print("\n読み上げを中断しました。")
+    except Exception as e:
+        print(f"TTSでエラーが発生しました: {e}")
+    finally:
+        # 監視スレッドはVAD戻りで自然終了。長時間ブロックを避けて短めにjoin。
+        watcher.join(timeout=0.1)
 
 def replace_placeholders(text: str, owner_name: str, your_name: str) -> str:
     text = text.replace("{owner_name}", owner_name)
