@@ -74,11 +74,18 @@ class HaloApp:
             intonationScale=self.tts_config["intonationScale"],
         )
 
+        # フィラー時のボイス
         if self.isfiller:
             self.player = WavPlayer()
             self.player.preload_dir("./filler")
         else:
             self.player = None
+        # 割り込み時のボイス
+        if self.config["warikomi_voice"]["use_warikomi_voice"]:
+            self.warikomi_player = WavPlayer()
+            self.warikomi_player.preload_dir(self.config["warikomi_voice"]["warikomi_dir"])
+        else:
+            self.warikomi_player = None
 
         # プリウォーム
         try:
@@ -139,9 +146,9 @@ class HaloApp:
 
                 self.move_pan_kyoro_kyoro(2, 1)
                 self.move_tilt_kyoro_kyoro(2)
-                is_vad = self.config["vad"]["use_vad"]
                 self.exec_tts_with_live_stt(response)
                 """
+                is_vad = self.config["vad"]["use_vad"]
                 if is_vad:
                     self.exec_tts_with_vad(response)
                 else:
@@ -304,56 +311,6 @@ class HaloApp:
                 self.player.random_play(block=False)
             print("filler再生中")
 
-    def exec_tts_with_vad(self, text: str):
-        print(f"exec_tts_with_vad: {text}")
-        cfg = self.config["vad"]
-        corr_gate = CorrelationGate(
-            sample_rate=cfg["samplereate"],
-            frame_ms=cfg["frame_duration_ms"],
-            buffer_sec=1.0,
-            corr_threshold=cfg["corr_threshold"],
-            max_lag_ms=cfg["max_lag_ms"],
-        )
-        stop_event = threading.Event()
-        def _vad_watcher():
-            VAD_FINISH_COUNT = 3
-            detect_count = 0
-            while not stop_event.is_set() and detect_count < VAD_FINISH_COUNT:
-                ok = VAD.listen_until_voice_webrtc(
-                    aggressiveness=3,
-                    samplerate=cfg["samplereate"],
-                    frame_duration_ms=cfg["frame_duration_ms"],
-                    device=None,
-                    timeout_seconds=None,
-                    min_consecutive_speech_frames=cfg["min_consecutive_speech_frames"],
-                    corr_gate=corr_gate,
-                    stop_event=stop_event,
-                )
-                if stop_event.is_set():
-                    break
-                if ok:
-                    print(f"割り込み : VADで音声が検出されました。{detect_count}")
-                    detect_count += 1
-            if detect_count >= VAD_FINISH_COUNT:
-                print(f"割り込み : 音声を{VAD_FINISH_COUNT}回検知したため停止します。")
-                self.tts.stop()
-
-        watcher = threading.Thread(target=_vad_watcher, daemon=True)
-        watcher.start()
-        try:
-            self.tts.speak(text, self.led, self.use_led, self.motor, self.use_motor, corr_gate=corr_gate)
-        except KeyboardInterrupt:
-            self.tts.stop()
-            print("\n読み上げを中断しました。")
-        except Exception as e:
-            print(f"TTSでエラーが発生しました: {e}")
-        finally:
-            stop_event.set()
-            watcher.join(timeout=1.0)
-    
-    def exec_tts_no_vad(self, text: str):
-        self.tts.speak(text, self.led, self.use_led, self.motor, self.use_motor, corr_gate=None)
-
     def exec_tts_with_live_stt(self, text: str, interrupt_word: str = "待"):
         """
         音声合成中に同時に音声認識（中間結果を取得）。
@@ -393,6 +350,9 @@ class HaloApp:
                     if self.interrupt_word_pattern.match(txt):
                         print(f"tts中間結果に『{self.interrupt_word}』を検出")
                         self.tts.stop()
+                        if self.warikomi_player:
+                            self.warikomi_player.random_play(block=False)
+                            print("割り込み時のボイス再生中")
                 except Exception:
                     pass
 
@@ -461,6 +421,57 @@ class HaloApp:
                 except AttributeError:
                     self.command_selector.select(str(value))
         return response
+
+    # ----------------- VADを使用したTTS(現在未使用) -----------------
+    def exec_tts_with_vad(self, text: str):
+        print(f"exec_tts_with_vad: {text}")
+        cfg = self.config["vad"]
+        corr_gate = CorrelationGate(
+            sample_rate=cfg["samplereate"],
+            frame_ms=cfg["frame_duration_ms"],
+            buffer_sec=1.0,
+            corr_threshold=cfg["corr_threshold"],
+            max_lag_ms=cfg["max_lag_ms"],
+        )
+        stop_event = threading.Event()
+        def _vad_watcher():
+            VAD_FINISH_COUNT = 3
+            detect_count = 0
+            while not stop_event.is_set() and detect_count < VAD_FINISH_COUNT:
+                ok = VAD.listen_until_voice_webrtc(
+                    aggressiveness=3,
+                    samplerate=cfg["samplereate"],
+                    frame_duration_ms=cfg["frame_duration_ms"],
+                    device=None,
+                    timeout_seconds=None,
+                    min_consecutive_speech_frames=cfg["min_consecutive_speech_frames"],
+                    corr_gate=corr_gate,
+                    stop_event=stop_event,
+                )
+                if stop_event.is_set():
+                    break
+                if ok:
+                    print(f"割り込み : VADで音声が検出されました。{detect_count}")
+                    detect_count += 1
+            if detect_count >= VAD_FINISH_COUNT:
+                print(f"割り込み : 音声を{VAD_FINISH_COUNT}回検知したため停止します。")
+                self.tts.stop()
+
+        watcher = threading.Thread(target=_vad_watcher, daemon=True)
+        watcher.start()
+        try:
+            self.tts.speak(text, self.led, self.use_led, self.motor, self.use_motor, corr_gate=corr_gate)
+        except KeyboardInterrupt:
+            self.tts.stop()
+            print("\n読み上げを中断しました。")
+        except Exception as e:
+            print(f"TTSでエラーが発生しました: {e}")
+        finally:
+            stop_event.set()
+            watcher.join(timeout=1.0)
+    
+    def exec_tts_no_vad(self, text: str):
+        self.tts.speak(text, self.led, self.use_led, self.motor, self.use_motor, corr_gate=None)
 
 
 if __name__ == "__main__":
