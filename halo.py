@@ -115,6 +115,9 @@ class HaloApp:
     # ----------------- ライフサイクル -----------------
     def run(self) -> None:
         print("=== 常時STTモードを開始します（Ctrl+Cで終了）===")
+        # タイムアウト（秒）。設定があれば使用、なければ120秒。
+        run_timeout_sec = float(self.config.get("run_timeout_sec", 120))
+        run_deadline = time.perf_counter() + run_timeout_sec
         recognizing_cb = None
         recognized_cb = None
         canceled_cb = None
@@ -209,7 +212,21 @@ class HaloApp:
                     except Exception:
                         pass
                 def on_canceled(evt):
-                    print("STTキャンセル:", getattr(evt, "reason", None))
+                    try:
+                        reason = getattr(evt, "reason", None)
+                        result = getattr(evt, "result", None)
+                        result_reason = getattr(result, "reason", None)
+                        error_details = getattr(evt, "error_details", None)
+                        cancel_details = None
+                        if result is not None and hasattr(result, "cancellation_details"):
+                            cd = result.cancellation_details
+                            try:
+                                cancel_details = f"reason={getattr(cd,'reason',None)} error_details={getattr(cd,'error_details',None)} error_code={getattr(cd,'error_code',None)}"
+                            except Exception:
+                                cancel_details = str(cd)
+                        print(f"STTキャンセル: reason={reason} result_reason={result_reason} error_details={error_details} cancel_details={cancel_details}")
+                    except Exception as e:
+                        print(f"STTキャンセル: 詳細取得失敗: {e}")
                 def on_session_started(evt):
                     print("=== 連続認識開始 ===")
                 def on_session_stopped(evt):
@@ -312,8 +329,12 @@ class HaloApp:
             self.processor_thread = threading.Thread(target=_processor_loop, daemon=True)
             self.processor_thread.start()
 
-            # メインスレッドは待機
+            # メインスレッドは待機（タイムアウト監視）
             while self.is_running:
+                if time.perf_counter() >= run_deadline:
+                    print(f"タイムアウト({run_timeout_sec:.0f}s)により終了します。")
+                    self.is_running = False
+                    break
                 time.sleep(0.2)
 
         except KeyboardInterrupt:

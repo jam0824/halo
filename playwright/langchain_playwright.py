@@ -90,9 +90,10 @@ async def run_message(user_message: str) -> str:
     agent = create_react_agent(model=llm, tools=listTools)
 
     # 実行（結果返却後もブラウザは閉じない）
-    result = await agent.ainvoke({
-        "messages": [("user", user_message)]
-    })
+    result = await agent.ainvoke(
+        {"messages": [("user", user_message)]},
+        config={"recursion_limit": 50},
+    )
 
     return result["messages"][-1].content
 
