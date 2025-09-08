@@ -164,7 +164,8 @@ class HaloApp:
         self.is_running = True
         # タイムアウト（秒）。設定があれば使用、なければ120秒。
         run_timeout_sec = float(self.config.get("run_timeout_sec", 120))
-        run_deadline = time.perf_counter() + run_timeout_sec
+        self.run_deadline = time.perf_counter() + run_timeout_sec
+
         recognizing_cb = None
         recognized_cb = None
         canceled_cb = None
@@ -211,6 +212,11 @@ class HaloApp:
                     
                     # 応答読み上げ（割り込みで self.tts.stop() される想定）
                     self.tts.speak(self.response, self.led, self.use_led, self.motor, self.use_motor, corr_gate=corr_gate)
+
+                    # タイムアウト時間を更新
+                    self.run_deadline = time.perf_counter() + float(self.config.get("run_timeout_sec", 120))
+                    print(f"タイムアウト時間: {self.run_deadline}")
+
                 except KeyboardInterrupt:
                     with self._suppress_ex():
                         self.tts.stop()
@@ -372,8 +378,10 @@ class HaloApp:
 
             # メインスレッドは待機（タイムアウト監視）
             while self.is_running:
-                if time.perf_counter() >= run_deadline:
+                if time.perf_counter() >= self.run_deadline:
                     print(f"タイムアウト({run_timeout_sec:.0f}s)により終了します。")
+                    text = "おやすみ"
+                    self.tts.speak(text, self.led, self.use_led, self.motor, self.use_motor, corr_gate=corr_gate)
                     self.is_running = False
                     break
                 time.sleep(0.2)
