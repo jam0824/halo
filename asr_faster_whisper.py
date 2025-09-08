@@ -123,12 +123,14 @@ def main():
 
     # すぐに文字起こし
     print("📝 文字起こし中...")
+    start_time = time.perf_counter()
     model = WhisperModel(cfg.model_name, device="cpu", compute_type="int8")
     segments, info = model.transcribe(cfg.output_wav, language=cfg.language, beam_size=1)
-
     print(f"Detected: {info.language} ({info.language_probability:.2f})")
     for seg in segments:
         print(f"[{seg.start:.2f} -> {seg.end:.2f}] {seg.text}")
+    end_time = time.perf_counter()
+    print(f"[ASR latency] {end_time - start_time:.1f} s")
 
 
 if __name__ == "__main__":
