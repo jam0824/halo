@@ -15,6 +15,7 @@ from stt_google import GoogleSpeechToText
 from command_selector import CommandSelector
 from corr_gate import CorrelationGate
 from asr_coherence import ASRCoherenceFilter
+from vad import VAD
 
 if TYPE_CHECKING:
     from function_led import LEDBlinker
@@ -40,6 +41,8 @@ class HaloApp:
         self.tilt_pin: int = self.config["motor"]["tilt_pin"]
         self.interrupt_word: str = self.config["interrupt_word"]
         self.interrupt_word_pattern = re.compile(self.interrupt_word)
+        self.wakeup_word: str = self.config["wakeup_word"]
+        self.wakeup_word_pattern = re.compile(self.wakeup_word)
         self.similarity_threshold: float = self.config["similarity_threshold"]
         self.coherence_threshold: float = self.config["coherence_threshold"]
         self.command_selector = CommandSelector()
@@ -112,9 +115,53 @@ class HaloApp:
         self.processor_thread: Optional[threading.Thread] = None
         self.similarity = TextSimilarity()
 
+    # ----------------- メインループ -----------------
+    def main_loop(self) -> None:
+        # 1回のみ実行
+        if self.config["one_time_run"]:
+            self.run()
+            return
+        # 常時実行
+        while True:
+            if not self.is_vad():
+                time.sleep(0.1)
+                continue
+            first_text = self.first_stt()
+            if not self.wakeup_word_pattern.match(first_text):
+                print("keyword not in user_text")
+                time.sleep(0.1)
+                continue
+            halo_text = "ハロ、おしゃべりする！"
+            self.tts.speak(halo_text, self.led, self.use_led, self.motor, self.use_motor, corr_gate=None)
+            self.run()
+            # 実行後のクールダウン
+            time.sleep(1)
+    def is_vad(self) -> bool:
+        print("VAD detection start")
+        is_vad = VAD.listen_until_voice_webrtc(
+            aggressiveness=3,
+            samplerate=16000,
+            frame_duration_ms=20,
+            min_consecutive_speech_frames=12,
+            device=None,
+            timeout_seconds=None,
+            corr_gate=None,
+            stop_event=None,
+        )
+        if is_vad:
+            print("VAD detected")
+        return is_vad
+    def first_stt(self) -> str:
+        print("STT start")
+        text = self.exec_stt(self.stt)
+        user_text = self.apply_text_changes(text, self.change_name)
+        return user_text
+
     # ----------------- ライフサイクル -----------------
     def run(self) -> None:
         print("=== 常時STTモードを開始します（Ctrl+Cで終了）===")
+        # 2周目以降では前回終了時に False になっているため、毎回リセット
+        self.is_running = True
         # タイムアウト（秒）。設定があれば使用、なければ120秒。
         run_timeout_sec = float(self.config.get("run_timeout_sec", 120))
         run_deadline = time.perf_counter() + run_timeout_sec
@@ -153,7 +200,7 @@ class HaloApp:
                     user_text = self.apply_text_changes(text, self.change_name)
                     self.history = self.make_history(self.history, self.owner_name, user_text)
 
-                    if check_farewell(user_text):
+                    if self.check_farewell(user_text):
                         break
 
                     print("LLMで応答を生成中...")
@@ -277,17 +324,6 @@ class HaloApp:
                                 self.motor.stop_motion()
                             except Exception:
                                 pass
-                
-                # 終了コマンドチェック
-                def check_farewell(txt: str) -> bool:
-                    if self.check_end_command(txt):
-                        farewell = "バイバイ！"
-                        print(f"{self.your_name}: {farewell}")
-                        with self._suppress_ex():
-                            self.tts.speak(farewell, self.led, self.use_led, self.motor, self.use_motor, corr_gate=None)
-                        self.is_running = False
-                        return True
-                    return False
                     
 
                 rec = self.stt.recognizer
@@ -309,7 +345,7 @@ class HaloApp:
                     while self.is_running:
                         try:
                             text = self.exec_stt(self.stt)
-                            if check_farewell(text):
+                            if self.check_farewell(text):
                                 break
                             if text:
                                 print(f"確定: {text}")
@@ -467,6 +503,17 @@ class HaloApp:
         return _Ctx()
 
     # ----------------- 会話ロジック -----------------
+    # 終了コマンドチェック
+    def check_farewell(self, txt: str) -> bool:
+        if self.check_end_command(txt):
+            farewell = "バイバイ！"
+            print(f"{self.your_name}: {farewell}")
+            with self._suppress_ex():
+                self.tts.speak(farewell, self.led, self.use_led, self.motor, self.use_motor, corr_gate=None)
+            self.is_running = False
+            return True
+        return False
+
     def exec_stt(self, stt: Union[AzureSpeechToText, GoogleSpeechToText]) -> str:
         print("--- 音声入力待ち ---")
         try:
@@ -553,4 +600,5 @@ class HaloApp:
 
 if __name__ == "__main__":
     app = HaloApp()
-    app.run()
+    app.main_loop()
+    #app.run()

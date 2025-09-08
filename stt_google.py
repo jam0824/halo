@@ -168,7 +168,11 @@ class GoogleSpeechToText:
             pass
 
     def close(self) -> None:
-        # SpeechClient はGCで解放される
+        # SpeechClient はGCで解放されるが、マイク資源は明示解放
+        try:
+            MicrophoneStream.terminate_shared()
+        except Exception:
+            pass
         return None
 
     def listen_once(self, timeout_sec: float = 15.0) -> str:
