@@ -1,7 +1,7 @@
 {
   "owner_name": "まつ",
   "your_name": "ハロ",
-  "stt": "google",
+  "stt": "azure",
   "llm": "gpt-4o-mini",
   "one_time_run": true,
   "wakeup_word": ".*(ハロ|しゃべり|話).*",

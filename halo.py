@@ -344,6 +344,7 @@ class HaloApp:
                 def _fallback_listener():
                     while self.is_running:
                         try:
+                            print("STTフォールバック中...")
                             text = self.exec_stt(self.stt)
                             if self.check_farewell(text):
                                 break
@@ -351,8 +352,12 @@ class HaloApp:
                                 print(f"確定: {text}")
                                 with self._suppress_ex():
                                     self.tts.stop()
-                                _clear_queue(self.recognized_queue)
-                                self.recognized_queue.put(text)
+                                print("LLMで応答を生成中...")
+                                response_text = self.llm.generate_text(self.llm_model, text, self.system_content, self.history)
+                                self.response = self.get_halo_response(response_text)
+                                self.history = self.make_history(self.history, self.your_name, self.response)
+                                # 応答読み上げ（割り込みで self.tts.stop() される想定）
+                                self.tts.speak(self.response, self.led, self.use_led, self.motor, self.use_motor, corr_gate=corr_gate)
                         except KeyboardInterrupt:
                             self.is_running = False
                             break
