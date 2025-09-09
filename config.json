@@ -7,7 +7,7 @@
   "wakeup_word": ".*(ハロ|しゃべり|話).*",
   "run_timeout_sec": 120,
   "voiceVoxTTS": {
-    "base_url": "http://192.168.1.151:50021",
+    "base_url": "http://57.180.156.193",
     "speaker": 89,
     "max_len": 80,
     "queue_size": 4,

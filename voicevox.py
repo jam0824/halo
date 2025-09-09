@@ -24,7 +24,7 @@ class VoiceVoxTTS:
 
     def __init__(
         self,
-        base_url: str = "http://127.0.0.1:50021",
+        base_url: str = "http://57.180.156.193",
         speaker: int = 89,
         max_len: int = 80,
         queue_size: int = 4,

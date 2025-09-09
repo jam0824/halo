@@ -121,6 +121,8 @@ class HaloApp:
         if self.config["one_time_run"]:
             self.run()
             return
+        halo_text = "ハロ、起動した"
+        self.tts.speak(halo_text, self.led, self.use_led, self.motor, self.use_motor, corr_gate=None)
         # 常時実行
         while True:
             if not self.is_vad():
@@ -136,6 +138,8 @@ class HaloApp:
             self.run()
             # 実行後のクールダウン
             time.sleep(1)
+            halo_text = "ハロ、待機モード"
+            self.tts.speak(halo_text, self.led, self.use_led, self.motor, self.use_motor, corr_gate=None)
     def is_vad(self) -> bool:
         print("VAD detection start")
         is_vad = VAD.listen_until_voice_webrtc(
@@ -380,8 +384,6 @@ class HaloApp:
             while self.is_running:
                 if time.perf_counter() >= self.run_deadline:
                     print(f"タイムアウト({run_timeout_sec:.0f}s)により終了します。")
-                    text = "おやすみ"
-                    self.tts.speak(text, self.led, self.use_led, self.motor, self.use_motor, corr_gate=corr_gate)
                     self.is_running = False
                     break
                 time.sleep(0.2)
