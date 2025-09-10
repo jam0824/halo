@@ -40,6 +40,8 @@ class Motor:
     def clean_up(self):
         if self._cleaned:
             return
+        # 以降の新規操作を抑止
+        self._cleaned = True
         # 要求停止を出して実行中のスレッドを終了させる
         try:
             self._pan_stop_event.set()
@@ -52,18 +54,27 @@ class Motor:
             pass
         try:
             # サーボ信号を停止
-            self.pi.set_servo_pulsewidth(self.pan_pin, 0)
+            try:
+                self.pi.set_servo_pulsewidth(self.pan_pin, 0)
+            except Exception:
+                pass
         except Exception:
             pass
         try:
-            self.pi.set_servo_pulsewidth(self.tilt_pin, 0)
+            try:
+                self.pi.set_servo_pulsewidth(self.tilt_pin, 0)
+            except Exception:
+                pass
         except Exception:
             pass
         try:
             self.pi.stop()
         except Exception:
             pass
-        self._cleaned = True
+        try:
+            self.pi = None
+        except Exception:
+            pass
 
     def __enter__(self):
         return self
@@ -84,14 +95,24 @@ class Motor:
         return int(round(pw))
     
     def change_pan_angle(self, angle:float):
+        if self._cleaned or self.pi is None:
+            return
         adj = (self._max_angle - float(angle)) if self._invert_pan else float(angle)
         self._pan_angle = float(angle)
-        self.pi.set_servo_pulsewidth(self.pan_pin, self._angle_to_pulsewidth(adj))
+        try:
+            self.pi.set_servo_pulsewidth(self.pan_pin, self._angle_to_pulsewidth(adj))
+        except Exception:
+            pass
     
     def change_tilt_angle(self, angle:float):
+        if self._cleaned or self.pi is None:
+            return
         adj = (self._max_angle - float(angle)) if self._invert_tilt else float(angle)
         self._tilt_angle = float(angle)
-        self.pi.set_servo_pulsewidth(self.tilt_pin, self._angle_to_pulsewidth(adj))
+        try:
+            self.pi.set_servo_pulsewidth(self.tilt_pin, self._angle_to_pulsewidth(adj))
+        except Exception:
+            pass
 
     def pan_to_start_position(self):
         self.change_pan_angle(self.PAN_START_ANGLE)
@@ -115,6 +136,8 @@ class Motor:
         """パンのみイージングで左右へ往復する。
         duration は各移動(左->右, 右->左 など)の所要時間[s]。
         """
+        if self._cleaned:
+            return
         self._pan_stop_event.clear()
         if self._pan_stop_event.is_set():
             return
@@ -135,6 +158,8 @@ class Motor:
                 t = i / steps
                 p = t
                 angle = start + (end - start) * p
+                if self._cleaned:
+                    return True
                 self.change_pan_angle(angle)
                 if self._sleep_with_cancel(base_interval, self._pan_stop_event):
                     return True
@@ -155,18 +180,26 @@ class Motor:
         move_ease(current, float(self.PAN_START_ANGLE), float(duration))
 
     def _tilt_worker(self, up_angle:float, down_angle:float, duration:float, count:int=1):
+        if self._cleaned:
+            return
         self._tilt_stop_event.clear()
         if self._tilt_stop_event.is_set():
             return
         for _ in range(max(1, int(count))):
+            if self._cleaned:
+                return
             self.change_tilt_angle(up_angle)
             if self._sleep_with_cancel(duration, self._tilt_stop_event):
+                return
+            if self._cleaned:
                 return
             self.change_tilt_angle(down_angle)
             if self._sleep_with_cancel(duration, self._tilt_stop_event):
                 return
 
     def pan_kyoro_kyoro(self, left_angle:float, right_angle:float, time:float, count:int=1):
+        if self._cleaned:
+            return
         # 既存の動作があれば停止を指示
         try:
             self._pan_stop_event.set()
@@ -183,6 +216,8 @@ class Motor:
         self._pan_thread.start()
     
     def tilt_kyoro_kyoro(self, up_angle:float, down_angle:float, time:float, count:int=1):
+        if self._cleaned:
+            return
         # 既存の動作があれば停止を指示
         try:
             self._tilt_stop_event.set()
@@ -225,6 +260,8 @@ class Motor:
         """
         口パク時に呼ぶ
         """
+        if self._cleaned:
+            return
         self.tilt_kyoro_kyoro(120, self.TILT_START_ANGLE, 0.5, 2)
 
 

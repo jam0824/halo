@@ -4,7 +4,7 @@
   "stt": "azure",
   "llm": "gpt-4o-mini",
   "one_time_run": true,
-  "wakeup_word": ".*(ハロ|しゃべり|話).*",
+  "wakeup_word": ".*(ハロ|しゃべり|喋|話).*",
   "run_timeout_sec": 120,
   "voiceVoxTTS": {
     "base_url": "http://57.180.156.193",

@@ -125,6 +125,12 @@ class HaloApp:
         self.tts.speak(halo_text, self.led, self.use_led, self.motor, self.use_motor, corr_gate=None)
         # 常時実行
         while True:
+            self.run()
+            # 実行後のクールダウン
+            time.sleep(1)
+            halo_text = "ハロ、待機モード"
+            self.tts.speak(halo_text, self.led, self.use_led, self.motor, self.use_motor, corr_gate=None)
+            
             if not self.is_vad():
                 time.sleep(0.1)
                 continue
@@ -135,18 +141,14 @@ class HaloApp:
                 continue
             halo_text = "ハロ、おしゃべりする！"
             self.tts.speak(halo_text, self.led, self.use_led, self.motor, self.use_motor, corr_gate=None)
-            self.run()
-            # 実行後のクールダウン
-            time.sleep(1)
-            halo_text = "ハロ、待機モード"
-            self.tts.speak(halo_text, self.led, self.use_led, self.motor, self.use_motor, corr_gate=None)
+            
     def is_vad(self) -> bool:
         print("VAD detection start")
         is_vad = VAD.listen_until_voice_webrtc(
             aggressiveness=3,
             samplerate=16000,
             frame_duration_ms=20,
-            min_consecutive_speech_frames=12,
+            min_consecutive_speech_frames=8,
             device=None,
             timeout_seconds=None,
             corr_gate=None,
@@ -166,6 +168,8 @@ class HaloApp:
         print("=== 常時STTモードを開始します（Ctrl+Cで終了）===")
         # 2周目以降では前回終了時に False になっているため、毎回リセット
         self.is_running = True
+        # デバイスが前回の終了で解放済みなら再初期化
+        self._ensure_devices_ready()
         # タイムアウト（秒）。設定があれば使用、なければ120秒。
         run_timeout_sec = float(self.config.get("run_timeout_sec", 120))
         self.run_deadline = time.perf_counter() + run_timeout_sec
@@ -420,15 +424,61 @@ class HaloApp:
                 self.stt.close()
             with self._suppress_ex():
                 if self.use_motor and self.motor:
-                    self.motor.clean_up()
-                if self.use_led and self.led:
-                    # 確実にLEDを停止・消灯・解放
-                    self.led.stop_blink(wait=True)
-                    self.led.off()
+                    # 次回以降も継続利用するため解放せず停止のみにする
                     try:
-                        self.led.cleanup()
+                        self.motor.stop_motion()
                     except Exception:
                         pass
+                if self.use_led and self.led:
+                    # 確実にLEDを停止・消灯・解放
+                    try:
+                        self.led.stop_blink(wait=True)
+                    except Exception:
+                        pass
+                    try:
+                        self.led.off()
+                    except Exception:
+                        pass
+
+    def _ensure_devices_ready(self) -> None:
+        # LED がクリーンアップ済み、もしくは存在しない場合に再生成
+        if self.use_led:
+            try:
+                need_recreate_led = (
+                    self.led is None or
+                    bool(getattr(self.led, "_cleaned", False))
+                )
+            except Exception:
+                need_recreate_led = True
+            if need_recreate_led:
+                try:
+                    from function_led import LEDBlinker
+                    self.led = LEDBlinker(self.led_pin)
+                except Exception as e:
+                    print(f"LED再初期化に失敗しました: {e}")
+                    self.use_led = False
+                    self.led = None
+
+        # Motor がクリーンアップ済み、または pigpio が閉じている場合は再生成
+        if self.use_motor:
+            try:
+                pi_obj = getattr(self.motor, "pi", None)
+                need_recreate_motor = (
+                    self.motor is None or
+                    bool(getattr(self.motor, "_cleaned", False)) or
+                    pi_obj is None or
+                    (hasattr(pi_obj, "connected") and not getattr(pi_obj, "connected", False))
+                )
+            except Exception:
+                need_recreate_motor = True
+            if need_recreate_motor:
+                try:
+                    from function_motor import Motor
+                    self.motor = Motor(self.pan_pin, self.tilt_pin)
+                except Exception as e:
+                    print(f"モーター再初期化に失敗しました: {e}")
+                    self.use_motor = False
+                    self.motor = None
 
     # ----------------- 補助メソッド -----------------
     @staticmethod

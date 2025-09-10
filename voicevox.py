@@ -2,6 +2,7 @@ import wave
 import re
 import queue
 import threading
+import time
 from io import BytesIO
 from typing import Dict, Optional, TYPE_CHECKING
 
@@ -77,6 +78,7 @@ class VoiceVoxTTS:
         self.isMotor = isMotor
         self._stop_event.clear()
         self._is_speaking = True
+        start_time = time.perf_counter()
         chunks = self._split_into_chunks(text, self.max_len)
         q: "queue.Queue" = queue.Queue(maxsize=self.queue_size)
         STOP = object()
@@ -111,6 +113,8 @@ class VoiceVoxTTS:
                         except Exception:
                             pass
                     self._play(payload)
+                    end_time = time.perf_counter()
+                    print(f"[VoiceVox latency] {end_time - start_time:.1f} s")
                     if self._play_obj:
                         self._play_obj.wait_done()
                     """
@@ -229,7 +233,10 @@ class VoiceVoxTTS:
 
     def _led_stop_blink(self):
         if self.isLed and self.led is not None:
-            self.led.stop_blink()
+            try:
+                self.led.stop_blink(wait=True)
+            except Exception:
+                pass
             print("LED 点滅終了")
 
     def _motor_tilt(self):
@@ -254,7 +261,7 @@ class VoiceVoxTTS:
     
     _SENT_END = re.compile(r"[。．！？!?]\s*$")  # 文末検出（日本語/記号）
 
-    def stream_speak(self, token_iter, led: Optional["LEDBlinker"], isLed: bool, motor: Optional["Motor"], isMotor: bool):
+    def stream_speak(self, token_iter, led: Optional["LEDBlinker"], isLed: bool, motor: Optional["Motor"], isMotor: bool, corr_gate=None):
         """
         ストリーミング入力（文字列断片のイテレータ）を文単位にまとめて
         でき次第 VOICEVOX で合成→即時再生する。stop() で中断可。
@@ -264,6 +271,7 @@ class VoiceVoxTTS:
         self.motor = motor
         self.isMotor = isMotor
         self._stop_event.clear()
+        start_time = time.perf_counter()
         q: "queue.Queue" = queue.Queue(maxsize=self.queue_size)
         STOP = object()
 
@@ -302,7 +310,16 @@ class VoiceVoxTTS:
                     query = self._audio_query(sent, self.speaker)
                     query.update(self.params)
                     wav_bytes = self._synth(query, self.speaker)
+                    # 相関ゲート用にfar-endへPCMを供給
+                    if corr_gate is not None:
+                        try:
+                            pcm = self._wav_to_int16_mono16k(wav_bytes)
+                            corr_gate.publish_farend(pcm)
+                        except Exception:
+                            pass
                     self._play(wav_bytes)
+                    end_time = time.perf_counter()
+                    print(f"[VoiceVox latency] {end_time - start_time:.1f} s")
                     if self._play_obj:
                         self._play_obj.wait_done()
 

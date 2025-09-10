@@ -9,6 +9,7 @@ class LEDBlinker:
     self._stop_event = threading.Event()
     self._thread = None
     self._lock = threading.RLock()
+    self._cleaned = False
 
     if use_bcm:
       GPIO.setmode(GPIO.BCM)
@@ -26,29 +27,35 @@ class LEDBlinker:
 
   # 制御API
   def on(self):
+    if self._cleaned:
+      return
     self.stop_blink()
-    GPIO.output(self.pin, GPIO.HIGH)
+    self._safe_output(GPIO.HIGH)
 
   def off(self):
+    if self._cleaned:
+      return
     self.stop_blink()
-    GPIO.output(self.pin, GPIO.LOW)
+    self._safe_output(GPIO.LOW)
 
   def start_blink(self, on_sec: float = 0.3, off_sec: float = 0.3):
     with self._lock:
+      if self._cleaned:
+        return
       self.stop_blink()
       self._stop_event.clear()
 
       def _run():
         try:
           while not self._stop_event.is_set():
-            GPIO.output(self.pin, GPIO.HIGH)
+            self._safe_output(GPIO.HIGH)
             if self._stop_event.wait(on_sec):
               break
-            GPIO.output(self.pin, GPIO.LOW)
+            self._safe_output(GPIO.LOW)
             if self._stop_event.wait(off_sec):
               break
         finally:
-          GPIO.output(self.pin, GPIO.LOW)
+          self._safe_output(GPIO.LOW)
 
       self._thread = threading.Thread(target=_run, daemon=True)
       self._thread.start()
@@ -65,13 +72,20 @@ class LEDBlinker:
   def cleanup(self):
     # ブリンク停止とGPIO解放
     self.stop_blink(wait=True)
+    self._cleaned = True
     try:
-      GPIO.output(self.pin, GPIO.LOW)
+      self._safe_output(GPIO.LOW)
     except Exception:
       pass
     try:
       # ピン単体のクリーンアップ（環境によっては全体cleanup()でもOK）
       GPIO.cleanup(self.pin)
+    except Exception:
+      pass
+
+  def _safe_output(self, level):
+    try:
+      GPIO.output(self.pin, level)
     except Exception:
       pass
 
