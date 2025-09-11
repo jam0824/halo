@@ -2,6 +2,7 @@ import asyncio
 import websockets
 import pyaudio
 import numpy as np
+import webrtcvad
 import base64
 import json
 import os
@@ -141,17 +142,13 @@ corr_gate = CorrelationGate(
 
 # ===== 送受信ループ =====
 async def send_audio(websocket, stream, CHUNK, RATE, awaiting_response: asyncio.Event):
-    # VAD 閾値（originに近い挙動）
-    rms_threshold = float(config.get("vad", {}).get("rms_threshold", 500.0))
-
-    def is_voice(pcm16_bytes: bytes, threshold: float = rms_threshold) -> bool:
-        if not pcm16_bytes:
-            return False
-        data = np.frombuffer(pcm16_bytes, dtype=np.int16)
-        if data.size == 0:
-            return False
-        rms = np.sqrt(np.mean(np.square(data.astype(np.float32))))
-        return rms >= threshold
+    # webrtcvad の設定
+    vad_cfg = config.get("vad", {})
+    vad_aggr = int(vad_cfg.get("aggressiveness", 3))
+    vad_frame_ms = int(vad_cfg.get("frame_duration_ms", 20))
+    if vad_frame_ms not in (10, 20, 30):
+        vad_frame_ms = 20
+    vad = webrtcvad.Vad(vad_aggr)
 
     def read_audio_block():
         try:
@@ -170,6 +167,22 @@ async def send_audio(websocket, stream, CHUNK, RATE, awaiting_response: asyncio.
         x_old = np.arange(len(pcm))
         x_new = np.arange(0, len(pcm), 1.0 / ratio)
         return np.interp(x_new, x_old, pcm.astype(np.float32)).astype(np.int16)
+
+    def is_speech_webrtc(frame_16k: np.ndarray) -> bool:
+        # webrtcvad は 10/20/30ms のフレーム長のみ対応
+        samples_per_frame = int(16000 * vad_frame_ms / 1000)
+        if samples_per_frame <= 0:
+            return False
+        total = len(frame_16k)
+        # チャンク内のサブフレームのどれかが有声なら True
+        for start in range(0, total - samples_per_frame + 1, samples_per_frame):
+            sub = frame_16k[start:start + samples_per_frame]
+            try:
+                if vad.is_speech(sub.tobytes(), 16000):
+                    return True
+            except Exception:
+                continue
+        return False
 
     print("マイクから音声を取得して送信中...")
 
@@ -197,8 +210,8 @@ async def send_audio(websocket, stream, CHUNK, RATE, awaiting_response: asyncio.
         except Exception:
             tts_like = False
 
-        # TTS類似は送らず、VAD上も無音扱い
-        voiced_now = (not tts_like) and is_voice(audio_data)
+        # TTS類似は送らず、VAD上も無音扱い（webrtcvadで判定）
+        voiced_now = (not tts_like) and is_speech_webrtc(frame_16k)
         if not voiced_now:
             await asyncio.sleep(0)
             if voice_started:
@@ -271,39 +284,39 @@ async def receive_audio(websocket, awaiting_response: asyncio.Event):
         if etype == "input_audio_transcription.delta":
             txt = data.get("delta", "")
             if txt:
-                print(f"\nuser: {txt}", flush=True)
+                print(f"\nuser中間: {txt}")
             continue
         elif etype == "input_audio_transcription.completed":
             # ← 旧系は 'transcription' フィールド
             full = data.get("transcription", "")
             if full:
-                print(f"\nuser(final): {full}", flush=True)
+                print(f"\nuser(確定): {full}")
             continue
 
         # 2) 公式ドキュメント系（会話アイテム）
         elif etype == "conversation.item.audio_transcription.delta":
             txt = data.get("delta", "")
             if txt:
-                print(f"\nuser: {txt}", flush=True)
+                print(f"\nuser: {txt}")
             continue
         elif etype == "conversation.item.audio_transcription.completed":
             # ← こちらは 'text' だったり 'transcription' の実装もある
             full = data.get("text") or data.get("transcription") or ""
             if full:
-                print(f"\nuser(final): {full}", flush=True)
+                print(f"\nuser(final): {full}")
             continue
 
         # 3) ★今回あなたのログで来ている系（input_ が付く）
         elif etype == "conversation.item.input_audio_transcription.delta":
             txt = data.get("delta", "")
             if txt:
-                print(f"\nuser: {txt}", flush=True)
+                print(f"\nuser: {txt}")
             continue
         elif etype == "conversation.item.input_audio_transcription.completed":
             # ★ この系は completed のフィールド名が 'transcript'
             full = data.get("transcript", "")
             if full:
-                print(f"\nuser(final): {full}", flush=True)
+                print(f"\nuser(final): {full}")
             continue
 
         # テキスト出力（新APIのイベント名: response.text.delta）
@@ -326,7 +339,7 @@ async def receive_audio(websocket, awaiting_response: asyncio.Event):
                         except Exception:
                             pass
                     if speak_text:
-                        tts.stream_speak(speak_text, led, use_led, motor, use_motor, corr_gate=corr_gate)
+                        tts.speak(speak_text, led, use_led, motor, use_motor, corr_gate=corr_gate)
                     buf = ""
 
         # 文字ストリーム（サーバが音声を生成しつつ、その字幕としてテキストが来る場合）
@@ -339,7 +352,7 @@ async def receive_audio(websocket, awaiting_response: asyncio.Event):
             if _SENT_END.search(buf) or len(buf) >= tts.max_len:
                 s = buf.strip()
                 if s:
-                    tts.stream_speak(s, led, use_led, motor, use_motor, corr_gate=corr_gate)
+                    tts.speak(s, led, use_led, motor, use_motor, corr_gate=corr_gate)
                     buf = ""
         # オーディオ断片（必要なら処理を追加可能）
         elif etype == "response.audio.delta":
@@ -368,7 +381,7 @@ async def receive_audio(websocket, awaiting_response: asyncio.Event):
                 except Exception:
                     pass
                 if speak_text:
-                    tts.stream_speak(speak_text, led, use_led, motor, use_motor, corr_gate=corr_gate)
+                    tts.speak(speak_text, led, use_led, motor, use_motor, corr_gate=corr_gate)
             buf = ""
             await websocket.send(json.dumps({"type": "input_audio_buffer.clear"}))
             awaiting_response.clear()
@@ -457,7 +470,7 @@ async def stream_audio_and_receive_response():
         CHUNK = 2048
         FORMAT = pyaudio.paInt16
         CHANNELS = 1
-        RATE = 24000
+        RATE = 16000
 
         p = pyaudio.PyAudio()
         stream = p.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK)
