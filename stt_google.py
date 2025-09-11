@@ -3,7 +3,7 @@ import re
 import sys
 import time
 import threading
-from typing import Optional
+from typing import Optional, Callable, Iterator, Tuple
 
 from google.cloud import speech
 
@@ -176,6 +176,59 @@ class GoogleSpeechToText:
             pass
         return None
 
+    def listen_streaming_iter(
+        self,
+        *,
+        single_utterance: bool = False,
+    ) -> Iterator[Tuple[str, bool]]:
+        """
+        ストリーミングで (text, is_final) を逐次 yield するジェネレータ。
+
+        - single_utterance=True: 1発話で終了
+        - single_utterance=False: 連続で待ち受け
+        """
+        streaming_config = speech.StreamingRecognitionConfig(
+            config=self._config,
+            interim_results=True,
+            single_utterance=bool(single_utterance),
+        )
+
+        try:
+            while True:
+                with MicrophoneStream(self.rate, self.chunk) as stream:
+                    audio_generator = stream.generator()
+                    requests = (
+                        speech.StreamingRecognizeRequest(audio_content=content)
+                        for content in audio_generator
+                    )
+                    responses = self._client.streaming_recognize(streaming_config, requests)
+
+                    for response in responses:
+                        if not response.results:
+                            continue
+                        result = response.results[0]
+                        if not result.alternatives:
+                            continue
+                        transcript = result.alternatives[0].transcript or ""
+                        if not transcript:
+                            continue
+                        if result.is_final:
+                            yield (transcript.strip(), True)
+                            if single_utterance:
+                                return
+                            # 次の発話を待つ（外側のwhileで新規ストリーム）
+                            break
+                        else:
+                            yield (transcript, False)
+                if single_utterance:
+                    break
+        except KeyboardInterrupt:
+            return
+        except Exception as e:
+            if self.debug:
+                print(f"[listen_streaming_iter] error: {e}")
+            return
+
     def listen_once(self, timeout_sec: float = 15.0) -> str:
         def _dur_to_sec(dur) -> float:
             return (getattr(dur, "seconds", 0) or 0) + (getattr(dur, "nanos", 0) or 0) / 1e9
@@ -270,8 +323,14 @@ class GoogleSpeechToText:
 
 
 if __name__ == "__main__":
+    """
     stt = GoogleSpeechToText(debug=True)
     stt.warm_up()
     print("--- 発話してください ---")
     text = stt.listen_once()
     print("確定:", text)
+    """
+    stt = GoogleSpeechToText(debug=False)
+    print("--- 発話してください ---")
+    for text, is_final in stt.listen_streaming_iter(single_utterance=False):
+        print("final:" if is_final else "partial:", text)

@@ -217,7 +217,7 @@ class HaloApp:
                     self.response = self.get_halo_response(response_text)
                     self.history = self.make_history(self.history, self.your_name, self.response)
 
-                    
+                    print(f"応答: {self.response}")
                     # 応答読み上げ（割り込みで self.tts.stop() される想定）
                     self.tts.speak(self.response, self.led, self.use_led, self.motor, self.use_motor, corr_gate=corr_gate)
 
@@ -631,32 +631,21 @@ class HaloApp:
 
     def get_halo_response(self, text: str) -> str:
         print(f"text: {text}")
-        response_json = json.loads(text)
-        response = self.replace_dont_need_word(response_json['message'], self.your_name)
-
-        command = response_json['command']
-        if command:
-            for key, value in command.items():
-                # 利用側の実装に合わせてここでディスパッチ
-                try:
-                    self.command_selector.exec_command(key, value)  # 型があればそちらに合わせる
-                except AttributeError:
-                    self.command_selector.select(str(value))
-        return response
-
-    def get_halo_response(self, text: str) -> str:
-        print(f"text: {text}")
-        response_json = json.loads(text)
-        response = self.replace_dont_need_word(response_json['message'], self.your_name)
-
-        command = response_json['command']
-        if command:
-            for key, value in command.items():
-                # 利用側の実装に合わせてここでディスパッチ
-                try:
-                    self.command_selector.exec_command(key, value)  # 型があればそちらに合わせる
-                except AttributeError:
-                    self.command_selector.select(str(value))
+        response = text
+        try:
+            response_json = json.loads(text)
+            response = self.replace_dont_need_word(response_json['message'], self.your_name)
+        
+            command = response_json['command']
+            if command:
+                for key, value in command.items():
+                    # 利用側の実装に合わせてここでディスパッチ
+                    try:
+                        self.command_selector.exec_command(key, value)  # 型があればそちらに合わせる
+                    except AttributeError:
+                        self.command_selector.select(str(value))
+        except Exception:
+            pass
         return response
 
     
