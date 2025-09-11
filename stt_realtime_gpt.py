@@ -24,7 +24,9 @@ HEADERS = {
     "Authorization": "Bearer "+ API_KEY
 }
 
-
+def load_system_prompt(system_prompt_path: str = "system_prompt.md") -> str:
+    with open(system_prompt_path, "r", encoding="utf-8") as f:
+        return f.read()
 
 def load_config(config_path: str = "config.json") -> dict:
     """設定ファイル（config.json）を読み込む"""
@@ -70,7 +72,7 @@ def get_default_config() -> dict:
     }
 
 config = load_config()
-system_content = config["system_content"]
+system_content = load_system_prompt()
 owner_name = config["owner_name"]
 your_name = config["your_name"]
 stt_type = config["stt"]
@@ -281,7 +283,7 @@ async def stream_audio_and_receive_response():
             "type": "session.update",
             "session": {
                 "type":"realtime",
-                "instructions": system_content.format(owner_name=owner_name, your_name=your_name)
+                "instructions": system_content
             }
         }
         await websocket.send(json.dumps(session_update))
