@@ -215,7 +215,10 @@ class HaloApp:
 
                     print("LLMで応答を生成中...")
                     response_text = self.llm.generate_text(self.llm_model, user_text, self.system_content, self.history)
-                    self.response = self.halo_helper.get_halo_response(response_text)
+                    self.response, self.command = self.halo_helper.get_halo_response(response_text)
+                    # コマンドがあれば実行
+                    if self.command != {}:
+                        self.command_selector.exec_command(self.command["key"], self.command["value"])
                     self.history = self.halo_helper.append_history(self.history, self.your_name, self.response)
 
                     print(f"応答: {self.response}")
@@ -369,7 +372,7 @@ class HaloApp:
                                     self.tts.stop()
                                 print("LLMで応答を生成中...")
                                 response_text = self.llm.generate_text(self.llm_model, text, self.system_content, self.history)
-                                self.response = self.halo_helper.get_halo_response(response_text)
+                                self.response, self.command = self.halo_helper.get_halo_response(response_text)
                                 self.history = self.halo_helper.append_history(self.history, self.your_name, self.response)
                                 # 応答読み上げ（割り込みで self.tts.stop() される想定）
                                 self.tts.speak(self.response, self.led, self.use_led, self.motor, self.use_motor, corr_gate=corr_gate)
