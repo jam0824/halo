@@ -180,6 +180,7 @@ class GoogleSpeechToText:
         self,
         *,
         single_utterance: bool = False,
+        rpc_timeout_sec: float = 45.0,
     ) -> Iterator[Tuple[str, bool]]:
         """
         ストリーミングで (text, is_final) を逐次 yield するジェネレータ。
@@ -197,11 +198,13 @@ class GoogleSpeechToText:
             while True:
                 with MicrophoneStream(self.rate, self.chunk) as stream:
                     audio_generator = stream.generator()
+
                     requests = (
                         speech.StreamingRecognizeRequest(audio_content=content)
                         for content in audio_generator
                     )
-                    responses = self._client.streaming_recognize(streaming_config, requests)
+
+                    responses = self._client.streaming_recognize(streaming_config, requests, timeout=float(rpc_timeout_sec))
 
                     for response in responses:
                         if not response.results:
@@ -229,7 +232,7 @@ class GoogleSpeechToText:
                 print(f"[listen_streaming_iter] error: {e}")
             return
 
-    def listen_once(self, timeout_sec: float = 15.0) -> str:
+    def listen_once(self, timeout_sec: float = 15.0, rpc_timeout_sec: float = 45.0) -> str:
         def _dur_to_sec(dur) -> float:
             return (getattr(dur, "seconds", 0) or 0) + (getattr(dur, "nanos", 0) or 0) / 1e9
 
@@ -257,19 +260,24 @@ class GoogleSpeechToText:
             # ★ストリーム開始時刻
             t_stream_start = time.time()
 
-            responses = self._client.streaming_recognize(self._streaming_config, requests)
+            responses = self._client.streaming_recognize(self._streaming_config, requests, timeout=float(rpc_timeout_sec))
 
             num_chars_printed = 0
             final_text = ""
             t_first_partial = None
 
+            count = 0
             for response in responses:
+                count += 1
+                print(f"count: {count}")
                 if time.time() > deadline:
                     break
                 if not response.results:
+                    print("resultsがない")
                     continue
                 result = response.results[0]
                 if not result.alternatives:
+                    print("alternativesがない")
                     continue
 
                 transcript = result.alternatives[0].transcript or ""
@@ -292,6 +300,18 @@ class GoogleSpeechToText:
                     print(transcript + overwrite_chars)
                 final_text = transcript.strip()
 
+
+                # デバッグモードでなければ終了
+                if not self.debug:
+                    try:
+                        # 明示的にストリームを閉じる
+                        print("ストリームを閉じた")
+                        responses.cancel()
+                    except Exception:
+                        pass
+                    break
+
+                # デバッグモードなら時間を出す
                 # ★メトリクス算出
                 t_final = time.time()
 
@@ -316,6 +336,11 @@ class GoogleSpeechToText:
                 print(f"[DEBUG] result_end_time (utterance end in stream)音声ストリームの開始から数えて、発話が終了した位置: {utter_end_sec:.3f} s")
                 print(f"[DEBUG] speech_start_offset (first word start)最初の単語が出現した時刻: {speech_start_sec:.3f} s")
 
+                try:
+                    # 明示的にストリームを閉じる
+                    responses.cancel()
+                except Exception:
+                    pass
                 break
 
         return final_text

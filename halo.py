@@ -16,6 +16,7 @@ from command_selector import CommandSelector
 from corr_gate import CorrelationGate
 from asr_coherence import ASRCoherenceFilter
 from vad import VAD
+from halo_helper import HaloHelper
 
 if TYPE_CHECKING:
     from function_led import LEDBlinker
@@ -24,8 +25,8 @@ if TYPE_CHECKING:
 
 class HaloApp:
     def __init__(self) -> None:
-        self.config = self.load_config()
-        self.system_content_template = self.load_system_prompt()
+        self.halo_helper = HaloHelper()
+        self.config = self.halo_helper.load_config()
 
         self.owner_name: str = self.config["owner_name"]
         self.your_name: str = self.config["your_name"]
@@ -49,6 +50,8 @@ class HaloApp:
         self.llm = LLM()
         self.stt = self.load_stt(self.stt_type)
         self.asr_coherence_filter = ASRCoherenceFilter()
+
+        self.system_content = self.halo_helper.load_system_prompt_and_replace(self.owner_name, self.your_name)
 
         self.led: Optional["LEDBlinker"] = None
         if self.use_led:
@@ -94,10 +97,6 @@ class HaloApp:
             self.warikomi_player.preload_dir(self.config["warikomi_voice"]["warikomi_dir"])
         else:
             self.warikomi_player = None
-
-        self.system_content = self.replace_placeholders(
-            self.system_content_template, self.owner_name, self.your_name
-        )
         
         self.is_warikomi = False    # 割り込み中かどうか
         print(self.system_content)
@@ -208,16 +207,19 @@ class HaloApp:
                 except queue.Empty:
                     continue
                 try:
-                    user_text = self.apply_text_changes(text, self.change_name)
-                    self.history = self.make_history(self.history, self.owner_name, user_text)
+                    user_text = self.halo_helper.apply_text_changes(text, self.change_name)
+                    self.history = self.halo_helper.append_history(self.history, self.owner_name, user_text)
 
                     if self.check_farewell(user_text):
                         break
 
                     print("LLMで応答を生成中...")
                     response_text = self.llm.generate_text(self.llm_model, user_text, self.system_content, self.history)
-                    self.response = self.get_halo_response(response_text)
-                    self.history = self.make_history(self.history, self.your_name, self.response)
+                    self.response, self.command = self.halo_helper.get_halo_response(response_text)
+                    # コマンドがあれば実行
+                    if self.command != {}:
+                        self.command_selector.exec_command(self.command["key"], self.command["value"])
+                    self.history = self.halo_helper.append_history(self.history, self.your_name, self.response)
 
                     print(f"応答: {self.response}")
                     # 応答読み上げ（割り込みで self.tts.stop() される想定）
@@ -370,8 +372,8 @@ class HaloApp:
                                     self.tts.stop()
                                 print("LLMで応答を生成中...")
                                 response_text = self.llm.generate_text(self.llm_model, text, self.system_content, self.history)
-                                self.response = self.get_halo_response(response_text)
-                                self.history = self.make_history(self.history, self.your_name, self.response)
+                                self.response, self.command = self.halo_helper.get_halo_response(response_text)
+                                self.history = self.halo_helper.append_history(self.history, self.your_name, self.response)
                                 # 応答読み上げ（割り込みで self.tts.stop() される想定）
                                 self.tts.speak(self.response, self.led, self.use_led, self.motor, self.use_motor, corr_gate=corr_gate)
                         except KeyboardInterrupt:
@@ -483,51 +485,6 @@ class HaloApp:
                     self.motor = None
 
     # ----------------- 補助メソッド -----------------
-    @staticmethod
-    def load_system_prompt(system_prompt_path: str = "system_prompt.md") -> str:
-        with open(system_prompt_path, 'r', encoding='utf-8') as file:
-            system_prompt = file.read()
-        return system_prompt
-
-    @staticmethod
-    def load_config(config_path: str = "config.json") -> dict:
-        try:
-            with open(config_path, 'r', encoding='utf-8') as file:
-                config = json.load(file)
-            return config
-        except FileNotFoundError:
-            print(f"設定ファイル {config_path} が見つかりません。デフォルト設定を使用します。")
-            return HaloApp.get_default_config()
-        except json.JSONDecodeError as e:
-            print(f"設定ファイルの読み込みエラー: {e}。デフォルト設定を使用します。")
-            return HaloApp.get_default_config()
-
-    @staticmethod
-    def get_default_config() -> dict:
-        return {
-            "owner_name": "まつ",
-            "your_name": "ハロ",
-            "change_text": {"春": "ハロ"},
-            "llm": "gpt-4o-mini",
-            "voiceVoxTTS": {
-                "base_url": "http://127.0.0.1:50021",
-                "speaker": 89,
-                "max_len": 80,
-                "queue_size": 4,
-                "speedScale": 1.0,
-                "pitchScale": 0.0,
-                "intonationScale": 1.0,
-            },
-            "led": {"use_led": True, "led_pin": 17},
-            "motor": {"use_motor": True, "pan_pin": 4, "tilt_pin": 17},
-            "vad": {
-                "samplereate": 16000,
-                "frame_duration_ms": 20,
-                "min_consecutive_speech_frames": 12,
-                "corr_threshold": 0.60,
-                "max_lag_ms": 95,
-            },
-        }
 
     @staticmethod
     def load_stt(stt_type: str) -> Union[AzureSpeechToText, GoogleSpeechToText]:
@@ -537,28 +494,6 @@ class HaloApp:
             return GoogleSpeechToText()
         else:
             raise ValueError(f"Invalid STT type: {stt_type}")
-
-    @staticmethod
-    def replace_placeholders(text: str, owner_name: str, your_name: str) -> str:
-        text = text.replace("{owner_name}", owner_name)
-        text = text.replace("{your_name}", your_name)
-        return text
-
-    @staticmethod
-    def replace_dont_need_word(text: str, your_name: str) -> str:
-        text = text.replace(f"{your_name}:", "")
-        text = text.replace(f"{your_name}：", "")
-        return text
-
-    @staticmethod
-    def apply_text_changes(text: str, change_text_config: dict) -> str:
-        if not change_text_config:
-            return text
-        result = text
-        for key, value in change_text_config.items():
-            if key in result:
-                result = result.replace(key, value)
-        return result
 
     @staticmethod
     def _suppress_ex():
@@ -594,12 +529,6 @@ class HaloApp:
     def check_end_command(user_text: str) -> bool:
         return any(k in user_text for k in ("終了", "バイバイ", "さようなら"))
 
-    def make_history(self, history: str, name: str, message: str) -> str:
-        line_text = f"{name}: {message}"
-        history += line_text + "\n"
-        print(line_text)
-        return history
-
     def move_pan_kyoro_kyoro(self, speed: float = 1, count: int = 1):
         if self.use_motor and self.motor:
             self.motor.pan_kyoro_kyoro(80, 100, speed, count)
@@ -630,25 +559,6 @@ class HaloApp:
         except Exception:
             pass
         return score >= self.similarity_threshold
-
-    def get_halo_response(self, text: str) -> str:
-        print(f"text: {text}")
-        response = text
-        try:
-            response_json = json.loads(text)
-            response = self.replace_dont_need_word(response_json['message'], self.your_name)
-        
-            command = response_json['command']
-            if command:
-                for key, value in command.items():
-                    # 利用側の実装に合わせてここでディスパッチ
-                    try:
-                        self.command_selector.exec_command(key, value)  # 型があればそちらに合わせる
-                    except AttributeError:
-                        self.command_selector.select(str(value))
-        except Exception:
-            pass
-        return response
 
     
 
