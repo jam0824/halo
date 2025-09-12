@@ -1,13 +1,13 @@
 {
   "owner_name": "まつ",
   "your_name": "ハロ",
-  "stt": "azure",
-  "llm": "gpt-4o-mini",
+  "stt": "google",
+  "llm": "gpt-4.1-nano",
   "one_time_run": true,
   "wakeup_word": ".*(ハロ|しゃべり|喋|話).*",
   "run_timeout_sec": 120,
   "voiceVoxTTS": {
-    "base_url": "http://57.180.156.193",
+    "base_url": "http://192.168.1.151:50021",
     "speaker": 89,
     "max_len": 80,
     "queue_size": 4,

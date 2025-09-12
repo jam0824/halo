@@ -95,18 +95,20 @@ class HaloApp:
         else:
             self.warikomi_player = None
 
-        # プリウォーム
-        try:
-            self.stt.warm_up()
-        except Exception as e:
-            print(f"STT warm_up でエラー: {e}")
-
         self.system_content = self.replace_placeholders(
             self.system_content_template, self.owner_name, self.your_name
         )
         
         self.is_warikomi = False    # 割り込み中かどうか
         print(self.system_content)
+
+        # プリウォーム
+        try:
+            self.stt.warm_up()
+            response_text = self.llm.generate_text(self.llm_model, "日本語で会話", self.system_content, "")
+            print(response_text)
+        except Exception as e:
+            print(f"STT warm_up でエラー: {e}")
 
         # 常時STT運用用の状態
         self.history: str = ""
