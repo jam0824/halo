@@ -75,7 +75,7 @@ class HaloStreamingGoogle:
 
         # --- Google STT / LLM / 会話状態 ---
         # デバッグを有効化してエラー要因を可視化
-        self.stt = GoogleSpeechToText(debug=True)
+        self.stt = GoogleSpeechToText(debug=False)
         # マイク/クライアントの簡易ウォームアップ
         try:
             self.stt.warm_up()
@@ -89,6 +89,8 @@ class HaloStreamingGoogle:
         # TTSをバックグラウンドで回すためのスレッド管理
         self.tts_thread: Optional[threading.Thread] = None
         self.tts_lock = threading.Lock()
+        # STT安定化用カウンタ
+        self._stt_fail_count: int = 0
 
     # ---------- public ----------
     def run(self) -> None:
@@ -97,45 +99,47 @@ class HaloStreamingGoogle:
 
         try:
             while True:
-                print("[STT] ストリーム開始")
+                print("[STT] 開始")
                 had_any_result = False
                 did_barge_in_stop = False
                 try:
-                    for transcript, is_final in self.stt.listen_streaming_iter(single_utterance=False):
+                    transcript = self.stt.listen_once(timeout_sec=12.0, rpc_timeout_sec=45.0)
+                    if transcript:
                         had_any_result = True
-                        if not transcript:
-                            continue
-                        if is_final:
-                            print(f"\n確定: {transcript}")
-                            # 置換（名前など）
-                            user_text = self.halo_helper.apply_text_changes(transcript, self.change_text_map)
-                            # 履歴にユーザー発話を追加
-                            self.history = self.halo_helper.append_history(self.history, self.owner_name, user_text)
-                            # LLMで応答
-                            try:
-                                print("LLMで応答を生成中...")
-                                response_text = self.llm.generate_text(self.llm_model, user_text, self.system_content, self.history)
-                            except Exception as e:
-                                print(f"LLMエラー: {e}")
-                                continue
-                            response = self.halo_helper.replace_dont_need_word(response_text, self.your_name)
-                            self.history = self.halo_helper.append_history(self.history, self.your_name, response)
-                            # 新規確定が来たら現TTSを停止し、最新のみ再生
-                            self.speak_async(response)
-                        else:
-                            # 中間は表示のみ
-                            print(f"\r中間: {transcript}", end="", flush=True)
-                            # 中間結果が最初に出たタイミングで現在のTTSを止める（バージイン）
-                            if not did_barge_in_stop:
-                                try:
-                                    self.stop_tts()
-                                except Exception:
-                                    pass
-                                did_barge_in_stop = True
+                        self._stt_fail_count = 0
+                    else:
+                        print("[STT] 結果なし（タイムアウト/無音）")
+                        self._stt_fail_count += 1
+                        time.sleep(0.1)
+                        continue
+
+                    print(f"\n確定: {transcript}")
+                    # 置換（名前など）
+                    user_text = self.halo_helper.apply_text_changes(transcript, self.change_text_map)
+                    # 履歴にユーザー発話を追加
+                    self.history = self.halo_helper.append_history(self.history, self.owner_name, user_text)
+                    # LLMで応答
+                    try:
+                        print("LLMで応答を生成中...")
+                        response_text = self.llm.generate_text(self.llm_model, user_text, self.system_content, self.history)
+                    except Exception as e:
+                        print(f"LLMエラー: {e}")
+                        continue
+                    response = self.halo_helper.replace_dont_need_word(response_text, self.your_name)
+                    self.history = self.halo_helper.append_history(self.history, self.your_name, response)
+                    # 新規確定が来たら現TTSを停止し、最新のみ再生
+                    self.speak_async(response)
+                    #self._reset_stt()
+
                 except KeyboardInterrupt:
-                    raise
+                    break
                 except Exception as e:
                     print(f"[STT] ループ内エラー: {e}")
+                    self._stt_fail_count += 1
+                    time.sleep(0.2)
+                    if self._stt_fail_count >= 3:
+                        print("[STT] エラーが続いたためクライアントを再生成します")
+                        self._reset_stt()
                 finally:
                     print("[STT] ストリーム終了")
                     # 何も結果が得られずに終了した場合、短い待機を挟んで再試行
@@ -178,7 +182,19 @@ class HaloStreamingGoogle:
             try:
                 # まずはスレッドの終了を待機
                 if self.tts_thread and self.tts_thread.is_alive():
-                    self.tts_thread.join(timeout=0.1)
+                    self.tts_thread.join(timeout=1.0)
+            except Exception as e:
+                print(f"TTSスレッド終了エラー: {e}")
+            # それでも再生が残っている場合はポーリングで確認
+            try:
+                deadline = time.time() + 3.0
+                while (
+                    (self.tts_thread and self.tts_thread.is_alive())
+                    or self.tts.is_playing()
+                ) and time.time() < deadline:
+                    time.sleep(0.02)
+                if self.tts_thread and not self.tts_thread.is_alive():
+                    self.tts_thread = None
             except Exception:
                 pass
             
@@ -190,6 +206,20 @@ class HaloStreamingGoogle:
 
             self.tts_thread = threading.Thread(target=_run, daemon=True)
             self.tts_thread.start()
+
+    def _reset_stt(self) -> None:
+        try:
+            self.stt.close()
+        except Exception as e:
+            print(f"STTクローズエラー: {e}")
+            pass
+        try:
+            print("STT再生成")
+            self.stt = GoogleSpeechToText(debug=False)
+            self.stt.warm_up()
+            self._stt_fail_count = 0
+        except Exception as e:
+            print(f"[STT] 再生成失敗: {e}")
 
 
 if __name__ == "__main__":
