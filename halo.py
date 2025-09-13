@@ -3,13 +3,13 @@ import threading
 import time
 from typing import Optional, TYPE_CHECKING, Union
 
-from halo_helper import HaloHelper
 from command_selector import CommandSelector
 from llm import LLM
 from stt_azure import AzureSpeechToText
 from stt_google import GoogleSpeechToText
 from voicevox import VoiceVoxTTS
 
+from helper.halo_helper import HaloHelper
 from helper.filler import Filler
 from helper.corr_gate import CorrelationGate
 from helper.asr_coherence import ASRCoherenceFilter
@@ -144,7 +144,7 @@ class Halo:
                         continue
 
                     user_text = self.stt.listen_once()
-                    if not user_text:
+                    if not user_text or user_text == "":
                         time.sleep(0.1)
                         continue
                     self.history = self.halo_helper.append_history(self.history, self.owner_name, user_text)
@@ -234,10 +234,10 @@ class Halo:
 
     def check_sentence(self, user_text: str, response: str) -> bool:
         if self.is_similarity_threshold(user_text, response):
-            print(f"類似度がしきい値を超えています :txt: {txt} :response: {response}")
+            print(f"類似度がしきい値を超えています :txt: {user_text} :response: {response}")
             return True
         if self.is_coherence_threshold(user_text, self.coherence_threshold):
-            print(f"破綻がしきい値を超えています :txt: {txt} :threshold: {threshold}")
+            print(f"破綻がしきい値を超えています :txt: {user_text} :threshold: {self.coherence_threshold}")
             return True
         return False
 
