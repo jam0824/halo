@@ -139,6 +139,7 @@ class Halo:
         try:
             while True:
                 try:
+                    # VADで発話を検出
                     if not self.is_vad(self.config):
                         time.sleep(0.1)
                         continue
@@ -167,7 +168,7 @@ class Halo:
                         self.command_selector.exec_command(self.command["key"], self.command["value"])
                     
 
-                    # 応答読み上げ
+                    # 応答読み上げは非同期で行う
                     self.speak_async(self.response)
                 except KeyboardInterrupt:
                     print("\n\n音声認識ループが中断されました")
