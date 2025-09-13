@@ -21,7 +21,7 @@ class AzureSpeechToText:
         # 終了サイレンスを短めに（確定を早く出す）
         # 300〜700ms 程度で調整してみてください
         self.speech_config.set_property(
-            speechsdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, "500"
+            speechsdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, "300"
         )
         # 先頭無音の許容（長すぎると開始が遅く見える）
         self.speech_config.set_property(

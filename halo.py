@@ -11,9 +11,9 @@ from stt_google import GoogleSpeechToText
 from corr_gate import CorrelationGate
 from asr_coherence import ASRCoherenceFilter
 from voicevox import VoiceVoxTTS
-from wav_player import WavPlayer
 from vad import VAD
 from similarity import TextSimilarity
+from filler import Filler
 
 
 if TYPE_CHECKING:
@@ -31,7 +31,8 @@ class Halo:
         self.llm_model: str = self.config["llm"]
         self.tts_config: dict = self.config["voiceVoxTTS"]
         self.change_name: dict = self.config["change_text"]
-        self.isfiller: bool = self.config.get("use_filler", False)
+        self.isfiller: bool = self.config["filler"]["use_filler"]
+        self.filler_dir: str = self.config["filler"]["filler_dir"]
         self.use_led: bool = self.config["led"]["use_led"]
         self.led_pin: int = self.config["led"]["led_pin"]
         self.use_motor: bool = self.config["motor"]["use_motor"]
@@ -52,7 +53,7 @@ class Halo:
         self.stt = self.load_stt(self.stt_type)
         self.asr_coherence_filter = ASRCoherenceFilter()
         self.similarity = TextSimilarity()
-
+        self.filler = Filler(self.isfiller, self.filler_dir)
         self.system_content = self.halo_helper.load_system_prompt_and_replace(self.owner_name, self.your_name)
         print(self.system_content)
 
@@ -97,20 +98,6 @@ class Halo:
             pitchScale=self.tts_config["pitchScale"],
             intonationScale=self.tts_config["intonationScale"],
         )
-
-        # フィラー時のボイス
-        if self.isfiller:
-            self.player = WavPlayer()
-            self.player.preload_dir("./filler")
-        else:
-            self.player = None
-        # 割り込み時のボイス
-        if self.config["warikomi_voice"]["use_warikomi_voice"]:
-            self.warikomi_player = WavPlayer()
-            self.warikomi_player.preload_dir(self.config["warikomi_voice"]["warikomi_dir"])
-        else:
-            self.warikomi_player = None
-        self.is_warikomi = False    # 割り込み中かどうか
 
         # プリウォーム
         try:
@@ -168,6 +155,8 @@ class Halo:
                     # 文章のチェックして、正しいユーザー発話ではない場合はcontinue
                     if self.check_sentence(user_text, self.response):
                         continue
+                    # フィラー再生
+                    self.say_filler()
 
                     print("LLMで応答を生成中...")
                     response_text = self.llm.generate_text(self.llm_model, user_text, self.system_content, self.history)
@@ -197,9 +186,10 @@ class Halo:
             except Exception:
                 pass
             try:
+                self.stop_led()
                 if self.use_led and self.led:
-                    self.led.stop_blink(wait=True)
                     self.led.off()
+                self.stop_motor()
             except Exception:
                 pass
 
@@ -214,6 +204,8 @@ class Halo:
         # 進行中があれば停止
         with self.tts_lock:
             self.stop_tts()
+            self.stop_led()
+            self.stop_motor()
             # 再生停止の完了を待つ（短時間）
             try:
                 # まずはスレッドの終了を待機
@@ -236,9 +228,7 @@ class Halo:
         if self.farewell_word_pattern.match(txt):
             farewell = "バイバイ！"
             print(f"{self.your_name}: {farewell}")
-            with self._suppress_ex():
-                self.tts.speak(farewell, self.led, self.use_led, self.motor, self.use_motor, corr_gate=self.corr_gate)
-            self.is_running = False
+            self.tts.speak(farewell, self.led, self.use_led, self.motor, self.use_motor, corr_gate=self.corr_gate)
             return True
         return False
 
@@ -248,6 +238,15 @@ class Halo:
             return True
         if self.is_coherence_threshold(user_text, self.coherence_threshold):
             print(f"破綻がしきい値を超えています :txt: {txt} :threshold: {threshold}")
+            return True
+        return False
+
+    def say_filler(self) -> bool:
+        if self.filler.say_filler():
+            if self.use_led and self.led:
+                self.led.start_blink()
+            self.move_tilt_kyoro_kyoro(2)
+            self.move_pan_kyoro_kyoro(1, 2)
             return True
         return False
 
@@ -275,6 +274,28 @@ class Halo:
         if is_noisy:
             return True
         return False
+
+    # ---------- メカ ----------
+    # LED停止
+    def stop_led(self):
+        if self.use_led and self.led:
+            self.led.stop_blink()
+        return
+    # モーター停止
+    def stop_motor(self):
+        if self.use_motor and self.motor:
+            try:
+                self.motor.stop_motion()
+            except Exception as e:
+                print(f"モーター停止エラー: {e}")
+        return
+    def move_pan_kyoro_kyoro(self, speed: float = 1, count: int = 1):
+        if self.use_motor and self.motor:
+            self.motor.pan_kyoro_kyoro(80, 100, speed, count)
+
+    def move_tilt_kyoro_kyoro(self, count: int = 1):
+        if self.use_motor and self.motor:
+            self.motor.motor_kuchipaku()
 
     # ---------- STT ----------
     def load_stt(self,stt_type: str) -> Union[AzureSpeechToText, GoogleSpeechToText]:
