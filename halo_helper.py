@@ -87,7 +87,11 @@ class HaloHelper:
         
         response = responses[0]
         tmp_command = responses[1].split(":")
-        command["key"] = tmp_command[0]
-        command["value"] = tmp_command[1]
+        if len(tmp_command) >= 2:
+            command["key"] = tmp_command[0]
+            command["value"] = tmp_command[1]
+        else:
+            command = {}
+
 
         return response, command

@@ -233,21 +233,7 @@ class GoogleSpeechToText:
             return
 
     def listen_once(self, timeout_sec: float = 15.0, rpc_timeout_sec: float = 45.0) -> str:
-        def _dur_to_sec(dur) -> float:
-            return (getattr(dur, "seconds", 0) or 0) + (getattr(dur, "nanos", 0) or 0) / 1e9
-
-        def _first_word_start_sec(result) -> float:
-            # 最初に非ゼロの start_time を持つ単語を探す。なければ 0 とみなす。
-            try:
-                words = result.alternatives[0].words
-                for w in words:
-                    s = _dur_to_sec(getattr(w, "start_time", None) or type("X", (), {"seconds": 0, "nanos": 0})())
-                    if s > 0:
-                        return s
-                return 0.0
-            except Exception:
-                return 0.0
-
+        
         deadline = time.time() + float(timeout_sec)
 
         with MicrophoneStream(self.rate, self.chunk) as stream:
@@ -266,18 +252,13 @@ class GoogleSpeechToText:
             final_text = ""
             t_first_partial = None
 
-            count = 0
             for response in responses:
-                count += 1
-                print(f"count: {count}")
                 if time.time() > deadline:
                     break
                 if not response.results:
-                    print("resultsがない")
                     continue
                 result = response.results[0]
                 if not result.alternatives:
-                    print("alternativesがない")
                     continue
 
                 transcript = result.alternatives[0].transcript or ""
@@ -300,50 +281,55 @@ class GoogleSpeechToText:
                     print(transcript + overwrite_chars)
                 final_text = transcript.strip()
 
-
-                # デバッグモードでなければ終了
-                if not self.debug:
-                    try:
-                        # 明示的にストリームを閉じる
-                        print("ストリームを閉じた")
-                        responses.cancel()
-                    except Exception:
-                        pass
-                    break
-
-                # デバッグモードなら時間を出す
-                # ★メトリクス算出
-                t_final = time.time()
-
-                # 音声内のタイムスタンプ
-                utter_end_sec = _dur_to_sec(getattr(result, "result_end_time", None) or type("X", (), {"seconds": 0, "nanos": 0})())
-                speech_start_sec = _first_word_start_sec(result)  # 無音を推定
-
-                # 各種指標
-                e2e_final = t_final - t_stream_start  # 1) ストリーム開始→最終結果
-                wait_from_speech_start = e2e_final - speech_start_sec  # 2) 発話開始→最終結果（無音除外）
-                processing_overhead_final = e2e_final - utter_end_sec  # 3) システム処理（モデル+ネット）推定
-
-                print(f"[METRIC] E2E final (stream start → final)音声認識を開けてから最終結果が返ってくるまでの時間: {e2e_final:.3f} s")
-                if t_first_partial is not None:
-                    e2e_first = t_first_partial - t_stream_start
-                    first_token_from_speech = max(0.0, e2e_first - speech_start_sec)
-                    print(f"[METRIC] First partial (stream start → first)ストリーミング開始から 最初の暫定結果が返ってくるまでの時間: {e2e_first:.3f} s")
-                    print(f"[METRIC] First partial (speech start → first)実際に喋り始めてから 最初の暫定結果が出るまでの時間。: {first_token_from_speech:.3f} s")
-
-                print(f"[METRIC] Wait from speech start → final / 発話開始から最終確定結果が返るまでの時間: {wait_from_speech_start:.3f} s")
-                print(f"[METRIC] Processing overhead (≈ e2e - utterance) / 音声を全部話し終えてから結果が確定するまでにかかった時間: {processing_overhead_final:.3f} s")
-                print(f"[DEBUG] result_end_time (utterance end in stream)音声ストリームの開始から数えて、発話が終了した位置: {utter_end_sec:.3f} s")
-                print(f"[DEBUG] speech_start_offset (first word start)最初の単語が出現した時刻: {speech_start_sec:.3f} s")
-
+                # デバッグモードであればメトリクスを表示して終了
+                if self.debug:
+                    self._print_metrics(result, t_stream_start, t_first_partial)
                 try:
-                    # 明示的にストリームを閉じる
                     responses.cancel()
                 except Exception:
                     pass
                 break
-
         return final_text
+
+    def _dur_to_sec(dur) -> float:
+        return (getattr(dur, "seconds", 0) or 0) + (getattr(dur, "nanos", 0) or 0) / 1e9
+
+    def _first_word_start_sec(result) -> float:
+        # 最初に非ゼロの start_time を持つ単語を探す。なければ 0 とみなす。
+        try:
+            words = result.alternatives[0].words
+            for w in words:
+                s = _dur_to_sec(getattr(w, "start_time", None) or type("X", (), {"seconds": 0, "nanos": 0})())
+                if s > 0:
+                    return s
+            return 0.0
+        except Exception:
+            return 0.0
+    
+
+    def _print_metrics(self, result, t_stream_start, t_first_partial) -> None:
+        t_final = time.time()
+
+        # 音声内のタイムスタンプ
+        utter_end_sec = _dur_to_sec(getattr(result, "result_end_time", None) or type("X", (), {"seconds": 0, "nanos": 0})())
+        speech_start_sec = _first_word_start_sec(result)  # 無音を推定
+
+        # 各種指標
+        e2e_final = t_final - t_stream_start  # 1) ストリーム開始→最終結果
+        wait_from_speech_start = e2e_final - speech_start_sec  # 2) 発話開始→最終結果（無音除外）
+        processing_overhead_final = e2e_final - utter_end_sec  # 3) システム処理（モデル+ネット）推定
+
+        print(f"[METRIC] E2E final (stream start → final)音声認識を開けてから最終結果が返ってくるまでの時間: {e2e_final:.3f} s")
+        if t_first_partial is not None:
+            e2e_first = t_first_partial - t_stream_start
+            first_token_from_speech = max(0.0, e2e_first - speech_start_sec)
+            print(f"[METRIC] First partial (stream start → first)ストリーミング開始から 最初の暫定結果が返ってくるまでの時間: {e2e_first:.3f} s")
+            print(f"[METRIC] First partial (speech start → first)実際に喋り始めてから 最初の暫定結果が出るまでの時間。: {first_token_from_speech:.3f} s")
+
+        print(f"[METRIC] Wait from speech start → final / 発話開始から最終確定結果が返るまでの時間: {wait_from_speech_start:.3f} s")
+        print(f"[METRIC] Processing overhead (≈ e2e - utterance) / 音声を全部話し終えてから結果が確定するまでにかかった時間: {processing_overhead_final:.3f} s")
+        print(f"[DEBUG] result_end_time (utterance end in stream)音声ストリームの開始から数えて、発話が終了した位置: {utter_end_sec:.3f} s")
+        print(f"[DEBUG] speech_start_offset (first word start)最初の単語が出現した時刻: {speech_start_sec:.3f} s")
 
 
 
