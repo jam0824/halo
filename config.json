@@ -2,7 +2,7 @@
   "owner_name": "まつ",
   "your_name": "ハロ",
   "stt": "azure",
-  "llm": "gpt-4o-mini",
+  "llm": "gpt-4.1-nano",
   "one_time_run": true,
   "wakeup_word": ".*(ハロ|しゃべり|喋|話).*",
   "run_timeout_sec": 120,
@@ -15,7 +15,7 @@
     "pitchScale": 0.0,
     "intonationScale": 1.0
   },
-  "use_filler": true,
+  "use_filler": false,
   "led":{
     "use_led": false,
     "led_pin": 27

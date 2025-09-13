@@ -53,6 +53,16 @@ class HaloApp:
 
         self.system_content = self.halo_helper.load_system_prompt_and_replace(self.owner_name, self.your_name)
 
+        # 相関ゲート（TTS由来の音を抑制）をアプリ全体で共有
+        cfg = self.config.get("vad", {})
+        self.corr_gate = CorrelationGate(
+            sample_rate=cfg.get("samplereate", 16000),
+            frame_ms=cfg.get("frame_duration_ms", 20),
+            buffer_sec=1.0,
+            corr_threshold=cfg.get("corr_threshold", 0.60),
+            max_lag_ms=cfg.get("max_lag_ms", 95),
+        )
+
         self.led: Optional["LEDBlinker"] = None
         if self.use_led:
             try:
@@ -123,14 +133,14 @@ class HaloApp:
             self.run()
             return
         halo_text = "ハロ、起動した"
-        self.tts.speak(halo_text, self.led, self.use_led, self.motor, self.use_motor, corr_gate=None)
+        self.tts.speak(halo_text, self.led, self.use_led, self.motor, self.use_motor, corr_gate=self.corr_gate)
         # 常時実行
         while True:
             self.run()
             # 実行後のクールダウン
             time.sleep(1)
             halo_text = "ハロ、待機モード"
-            self.tts.speak(halo_text, self.led, self.use_led, self.motor, self.use_motor, corr_gate=None)
+            self.tts.speak(halo_text, self.led, self.use_led, self.motor, self.use_motor, corr_gate=self.corr_gate)
             
             if not self.is_vad():
                 time.sleep(0.1)
@@ -141,7 +151,7 @@ class HaloApp:
                 time.sleep(0.1)
                 continue
             halo_text = "ハロ、おしゃべりする！"
-            self.tts.speak(halo_text, self.led, self.use_led, self.motor, self.use_motor, corr_gate=None)
+            self.tts.speak(halo_text, self.led, self.use_led, self.motor, self.use_motor, corr_gate=self.corr_gate)
             
     def is_vad(self) -> bool:
         print("VAD detection start")
@@ -152,7 +162,7 @@ class HaloApp:
             min_consecutive_speech_frames=8,
             device=None,
             timeout_seconds=None,
-            corr_gate=None,
+            corr_gate=self.corr_gate,
             stop_event=None,
         )
         if is_vad:
@@ -182,16 +192,6 @@ class HaloApp:
         session_stopped_cb = None
         rec = None
         self.response = ""
-
-        # 相関ゲート（TTS由来の音を抑制）
-        cfg = self.config.get("vad", {})
-        corr_gate = CorrelationGate(
-            sample_rate=cfg.get("samplereate", 16000),
-            frame_ms=cfg.get("frame_duration_ms", 20),
-            buffer_sec=1.0,
-            corr_threshold=cfg.get("corr_threshold", 0.60),
-            max_lag_ms=cfg.get("max_lag_ms", 95),
-        )
 
         def _clear_queue(q: "queue.Queue[str]") -> None:
             try:
@@ -223,7 +223,7 @@ class HaloApp:
 
                     print(f"応答: {self.response}")
                     # 応答読み上げ（割り込みで self.tts.stop() される想定）
-                    self.tts.speak(self.response, self.led, self.use_led, self.motor, self.use_motor, corr_gate=corr_gate)
+                    self.tts.speak(self.response, self.led, self.use_led, self.motor, self.use_motor, corr_gate=self.corr_gate)
 
                     # タイムアウト時間を更新
                     self.run_deadline = time.perf_counter() + float(self.config.get("run_timeout_sec", 120))
@@ -375,7 +375,7 @@ class HaloApp:
                                 self.response, self.command = self.halo_helper.get_halo_response(response_text)
                                 self.history = self.halo_helper.append_history(self.history, self.your_name, self.response)
                                 # 応答読み上げ（割り込みで self.tts.stop() される想定）
-                                self.tts.speak(self.response, self.led, self.use_led, self.motor, self.use_motor, corr_gate=corr_gate)
+                                self.tts.speak(self.response, self.led, self.use_led, self.motor, self.use_motor, corr_gate=self.corr_gate)
                         except KeyboardInterrupt:
                             self.is_running = False
                             break
@@ -511,7 +511,7 @@ class HaloApp:
             farewell = "バイバイ！"
             print(f"{self.your_name}: {farewell}")
             with self._suppress_ex():
-                self.tts.speak(farewell, self.led, self.use_led, self.motor, self.use_motor, corr_gate=None)
+                self.tts.speak(farewell, self.led, self.use_led, self.motor, self.use_motor, corr_gate=self.corr_gate)
             self.is_running = False
             return True
         return False
