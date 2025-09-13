@@ -1,30 +1,27 @@
-# halo.py
-import json
+import re
 import threading
 import time
-import re
-import queue
 from typing import Optional, TYPE_CHECKING, Union
-from similarity import TextSimilarity
 
+from halo_helper import HaloHelper
+from command_selector import CommandSelector
 from llm import LLM
-from voicevox import VoiceVoxTTS
-from wav_player import WavPlayer
 from stt_azure import AzureSpeechToText
 from stt_google import GoogleSpeechToText
-from command_selector import CommandSelector
 from corr_gate import CorrelationGate
 from asr_coherence import ASRCoherenceFilter
+from voicevox import VoiceVoxTTS
+from wav_player import WavPlayer
 from vad import VAD
-from halo_helper import HaloHelper
+from similarity import TextSimilarity
+
 
 if TYPE_CHECKING:
     from function_led import LEDBlinker
     from function_motor import Motor
 
-
-class HaloApp:
-    def __init__(self) -> None:
+class Halo:
+    def __init__(self):
         self.halo_helper = HaloHelper()
         self.config = self.halo_helper.load_config()
 
@@ -41,17 +38,23 @@ class HaloApp:
         self.pan_pin: int = self.config["motor"]["pan_pin"]
         self.tilt_pin: int = self.config["motor"]["tilt_pin"]
         self.interrupt_word: str = self.config["interrupt_word"]
+        self.coherence_threshold: float = self.config["coherence_threshold"]
+
         self.interrupt_word_pattern = re.compile(self.interrupt_word)
         self.wakeup_word: str = self.config["wakeup_word"]
         self.wakeup_word_pattern = re.compile(self.wakeup_word)
         self.similarity_threshold: float = self.config["similarity_threshold"]
-        self.coherence_threshold: float = self.config["coherence_threshold"]
+        self.farewell_word: str = self.config["farewell_word"]
+        self.farewell_word_pattern = re.compile(self.farewell_word)
+
         self.command_selector = CommandSelector()
         self.llm = LLM()
         self.stt = self.load_stt(self.stt_type)
         self.asr_coherence_filter = ASRCoherenceFilter()
+        self.similarity = TextSimilarity()
 
         self.system_content = self.halo_helper.load_system_prompt_and_replace(self.owner_name, self.your_name)
+        print(self.system_content)
 
         # 相関ゲート（TTS由来の音を抑制）をアプリ全体で共有
         cfg = self.config.get("vad", {})
@@ -107,9 +110,7 @@ class HaloApp:
             self.warikomi_player.preload_dir(self.config["warikomi_voice"]["warikomi_dir"])
         else:
             self.warikomi_player = None
-        
         self.is_warikomi = False    # 割り込み中かどうか
-        print(self.system_content)
 
         # プリウォーム
         try:
@@ -121,45 +122,21 @@ class HaloApp:
 
         # 常時STT運用用の状態
         self.history: str = ""
-        self.is_running: bool = True
-        self.recognized_queue: "queue.Queue[str]" = queue.Queue()
-        self.processor_thread: Optional[threading.Thread] = None
-        self.similarity = TextSimilarity()
+        self.response: str = ""
+        self.command: dict = {}
+        # TTSをバックグラウンドで回すためのスレッド管理
+        self.tts_thread: Optional[threading.Thread] = None
+        self.tts_lock = threading.Lock()
+        # STT安定化用カウンタ
+        self._stt_fail_count: int = 0
 
-    # ----------------- メインループ -----------------
-    def main_loop(self) -> None:
-        # 1回のみ実行
-        if self.config["one_time_run"]:
-            self.run()
-            return
-        halo_text = "ハロ、起動した"
-        self.tts.speak(halo_text, self.led, self.use_led, self.motor, self.use_motor, corr_gate=self.corr_gate)
-        # 常時実行
-        while True:
-            self.run()
-            # 実行後のクールダウン
-            time.sleep(1)
-            halo_text = "ハロ、待機モード"
-            self.tts.speak(halo_text, self.led, self.use_led, self.motor, self.use_motor, corr_gate=self.corr_gate)
-            
-            if not self.is_vad():
-                time.sleep(0.1)
-                continue
-            first_text = self.first_stt()
-            if not self.wakeup_word_pattern.match(first_text):
-                print("keyword not in user_text")
-                time.sleep(0.1)
-                continue
-            halo_text = "ハロ、おしゃべりする！"
-            self.tts.speak(halo_text, self.led, self.use_led, self.motor, self.use_motor, corr_gate=self.corr_gate)
-            
-    def is_vad(self) -> bool:
+    def is_vad(self, config: dict) -> bool:
         print("VAD detection start")
         is_vad = VAD.listen_until_voice_webrtc(
-            aggressiveness=3,
-            samplerate=16000,
-            frame_duration_ms=20,
-            min_consecutive_speech_frames=8,
+            aggressiveness=config["vad"]["aggressiveness"],
+            samplerate=config["vad"]["samplereate"],
+            frame_duration_ms=config["vad"]["frame_duration_ms"],
+            min_consecutive_speech_frames=config["vad"]["min_consecutive_speech_frames"],
             device=None,
             timeout_seconds=None,
             corr_gate=self.corr_gate,
@@ -168,346 +145,95 @@ class HaloApp:
         if is_vad:
             print("VAD detected")
         return is_vad
-    def first_stt(self) -> str:
-        print("STT start")
-        text = self.exec_stt(self.stt)
-        user_text = self.apply_text_changes(text, self.change_name)
-        return user_text
 
-    # ----------------- ライフサイクル -----------------
     def run(self) -> None:
-        print("=== 常時STTモードを開始します（Ctrl+Cで終了）===")
-        # 2周目以降では前回終了時に False になっているため、毎回リセット
-        self.is_running = True
-        # デバイスが前回の終了で解放済みなら再初期化
-        self._ensure_devices_ready()
-        # タイムアウト（秒）。設定があれば使用、なければ120秒。
-        run_timeout_sec = float(self.config.get("run_timeout_sec", 120))
-        self.run_deadline = time.perf_counter() + run_timeout_sec
+        print("========== 話しかけてください。Ctrl+Cで終了します。 ==========")
 
-        recognizing_cb = None
-        recognized_cb = None
-        canceled_cb = None
-        session_started_cb = None
-        session_stopped_cb = None
-        rec = None
-        self.response = ""
-
-        def _clear_queue(q: "queue.Queue[str]") -> None:
-            try:
-                while True:
-                    q.get_nowait()
-            except Exception:
-                pass
-
-        def _processor_loop():
-            while self.is_running:
+        try:
+            while True:
                 try:
-                    text = self.recognized_queue.get(timeout=0.1)
-                except queue.Empty:
-                    continue
-                try:
-                    user_text = self.halo_helper.apply_text_changes(text, self.change_name)
+                    if not self.is_vad(self.config):
+                        time.sleep(0.1)
+                        continue
+
+                    user_text = self.stt.listen_once()
+                    if not user_text:
+                        time.sleep(0.1)
+                        continue
                     self.history = self.halo_helper.append_history(self.history, self.owner_name, user_text)
 
+                    # 終了ワードのチェック
                     if self.check_farewell(user_text):
                         break
+                    # 文章のチェックして、正しいユーザー発話ではない場合はcontinue
+                    if self.check_sentence(user_text, self.response):
+                        continue
 
                     print("LLMで応答を生成中...")
                     response_text = self.llm.generate_text(self.llm_model, user_text, self.system_content, self.history)
                     self.response, self.command = self.halo_helper.get_halo_response(response_text)
+                    self.history = self.halo_helper.append_history(self.history, self.your_name, self.response)
                     # コマンドがあれば実行
                     if self.command != {}:
                         self.command_selector.exec_command(self.command["key"], self.command["value"])
-                    self.history = self.halo_helper.append_history(self.history, self.your_name, self.response)
+                    
 
-                    print(f"応答: {self.response}")
-                    # 応答読み上げ（割り込みで self.tts.stop() される想定）
-                    self.tts.speak(self.response, self.led, self.use_led, self.motor, self.use_motor, corr_gate=self.corr_gate)
-
-                    # タイムアウト時間を更新
-                    self.run_deadline = time.perf_counter() + float(self.config.get("run_timeout_sec", 120))
-                    print(f"タイムアウト時間: {self.run_deadline}")
-
+                    # 応答読み上げ
+                    self.speak_async(self.response)
                 except KeyboardInterrupt:
-                    with self._suppress_ex():
-                        self.tts.stop()
-                    self.is_running = False
+                    print("\n\n音声認識ループが中断されました")
                     break
-                except Exception as e:
-                    print(f"LLM/TTSでエラーが発生しました: {e}")
-
-        try:
-            # 認識イベントの登録（Azureの連続認識がある場合）
-            if hasattr(self.stt, "recognizer"):
-                #音声認識中のイベントハンドラ
-                def on_recognizing(evt):
-                    try:
-                        txt = getattr(evt.result, "text", "") or ""
-                        if txt:
-                            print(f"中間: {txt}")
-                            check_warikomi(txt)    # 割り込みチェック
-                        
-                    except Exception:
-                        pass
-                
-                #音声認識確定時のイベントハンドラ
-                def on_recognized(evt):
-                    try:
-                        txt = getattr(evt.result, "text", "") or ""
-                        if not txt:
-                            return
-                        print(f"確定: {txt}")
-                        self.is_warikomi = False
-
-                        # ハロが言った話と似ているか(true : 似てる)
-                        if is_similarity_threshold(txt, self.response):
-                            return
-                        # 文章が破綻していないか(true : 破綻)
-                        if is_coherence_threshold(txt, self.coherence_threshold):
-                            return
-                        # 新規の確定が来たら現在のTTSを停止し、最新のもののみ処理
-                        with self._suppress_ex():
-                            self.tts.stop()
-                        stop_led(); stop_motor()
-                        # フィラー再生（確定直後に再生開始）
-                        self.say_filler(txt)
-                        _clear_queue(self.recognized_queue)
-                        self.recognized_queue.put(txt)
-                    except Exception:
-                        pass
-                def on_canceled(evt):
-                    try:
-                        reason = getattr(evt, "reason", None)
-                        result = getattr(evt, "result", None)
-                        result_reason = getattr(result, "reason", None)
-                        error_details = getattr(evt, "error_details", None)
-                        cancel_details = None
-                        if result is not None and hasattr(result, "cancellation_details"):
-                            cd = result.cancellation_details
-                            try:
-                                cancel_details = f"reason={getattr(cd,'reason',None)} error_details={getattr(cd,'error_details',None)} error_code={getattr(cd,'error_code',None)}"
-                            except Exception:
-                                cancel_details = str(cd)
-                        print(f"STTキャンセル: reason={reason} result_reason={result_reason} error_details={error_details} cancel_details={cancel_details}")
-                    except Exception as e:
-                        print(f"STTキャンセル: 詳細取得失敗: {e}")
-                def on_session_started(evt):
-                    print("=== 連続認識開始 ===")
-                def on_session_stopped(evt):
-                    print("=== 連続認識終了 ===")
-                    
-                # 割り込みのチェック
-                def check_warikomi(txt: str):
-                    if self.interrupt_word_pattern.match(txt) and self.tts.is_playing() and not self.is_warikomi:
-                        self.is_warikomi = True
-                        print(f"tts中間結果に『{self.interrupt_word}』を検出")
-                        with self._suppress_ex():
-                            self.tts.stop()
-                        stop_motor()
-                        if getattr(self, "warikomi_player", None):
-                            try:
-                                self.warikomi_player.random_play(block=False)
-                                print("割り込み時のボイス再生中")
-                            except Exception:
-                                pass
-                
-                # 確定テキストが前回のハロの発言と似ていた場合ループバックと捉え無視
-                def is_similarity_threshold(txt: str, response: str) -> bool:
-                    if self.is_similarity_threshold(txt, response):
-                        print(f"類似度がしきい値を超えています :txt: {txt} :response: {response}")
-                        return True
-                    return False
-                def is_coherence_threshold(txt: str, threshold: float) -> bool:
-                    is_noisy, score = self.asr_coherence_filter.is_noisy(txt, threshold)
-                    # 完全に0の時は文中にハテナがあるなど
-                    if score == 0.0:
-                        is_noisy = False
-                    if is_noisy:
-                        print(f"破綻がしきい値を超えています :txt: {txt} :threshold: {threshold}")
-                        return True
-                    return False
-                
-                # LED停止
-                def stop_led():
-                    if self.use_led and self.led:
-                        with self._suppress_ex():
-                            self.led.stop_blink()
-                    return
-                # モーター停止
-                def stop_motor():
-                    if self.use_motor and self.motor:
-                        with self._suppress_ex():
-                            try:
-                                self.motor.stop_motion()
-                            except Exception:
-                                pass
-                    
-
-                rec = self.stt.recognizer
-                recognizing_cb = rec.recognizing.connect(on_recognizing)
-                recognized_cb = rec.recognized.connect(on_recognized)
-                canceled_cb = rec.canceled.connect(on_canceled)
-                session_started_cb = rec.session_started.connect(on_session_started)
-                session_stopped_cb = rec.session_stopped.connect(on_session_stopped)
-
-                # 接続開始 → 連続認識開始
-                if hasattr(self.stt, "connection") and self.stt.connection is not None:
-                    with self._suppress_ex():
-                        self.stt.connection.open(True)
-                rec.start_continuous_recognition_async().get()
-            else:
-                # フォールバック（中間は出せないため注意）
-                print("連続認識はAzureのみ対応。フォールバックで逐次認識します。")
-                def _fallback_listener():
-                    while self.is_running:
-                        try:
-                            print("STTフォールバック中...")
-                            text = self.exec_stt(self.stt)
-                            if self.check_farewell(text):
-                                break
-                            if text:
-                                print(f"確定: {text}")
-                                with self._suppress_ex():
-                                    self.tts.stop()
-                                print("LLMで応答を生成中...")
-                                response_text = self.llm.generate_text(self.llm_model, text, self.system_content, self.history)
-                                self.response, self.command = self.halo_helper.get_halo_response(response_text)
-                                self.history = self.halo_helper.append_history(self.history, self.your_name, self.response)
-                                # 応答読み上げ（割り込みで self.tts.stop() される想定）
-                                self.tts.speak(self.response, self.led, self.use_led, self.motor, self.use_motor, corr_gate=self.corr_gate)
-                        except KeyboardInterrupt:
-                            self.is_running = False
-                            break
-                        except Exception as e:
-                            print(f"STTフォールバック中にエラー: {e}")
-                            time.sleep(0.2)
-                threading.Thread(target=_fallback_listener, daemon=True).start()
-
-            # 応答処理スレッド開始
-            self.processor_thread = threading.Thread(target=_processor_loop, daemon=True)
-            self.processor_thread.start()
-
-            # メインスレッドは待機（タイムアウト監視）
-            while self.is_running:
-                if time.perf_counter() >= self.run_deadline:
-                    print(f"タイムアウト({run_timeout_sec:.0f}s)により終了します。")
-                    self.is_running = False
-                    break
-                time.sleep(0.2)
-
-        except KeyboardInterrupt:
-            print("\n\n会話を終了します。")
         except Exception as e:
-            print(f"\nエラーが発生しました: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"音声認識ループでエラーが発生しました: {e}")
         finally:
-            self.is_running = False
-            with self._suppress_ex():
-                if self.processor_thread is not None:
-                    self.processor_thread.join(timeout=1.0)
-            # 認識停止とハンドラ解除
-            with self._suppress_ex():
-                if hasattr(self.stt, "recognizer") and rec is not None:
-                    try:
-                        rec.stop_continuous_recognition_async().get()
-                    except Exception:
-                        pass
-                    try:
-                        rec.recognizing.disconnect(recognizing_cb) if recognizing_cb else None
-                        rec.recognized.disconnect(recognized_cb) if recognized_cb else None
-                        rec.canceled.disconnect(canceled_cb) if canceled_cb else None
-                        rec.session_started.disconnect(session_started_cb) if session_started_cb else None
-                        rec.session_stopped.disconnect(session_stopped_cb) if session_stopped_cb else None
-                    except Exception:
-                        pass
-            with self._suppress_ex():
-                self.tts.stop()
-            with self._suppress_ex():
+            try:
+                self.stop_tts()
+                if self.tts_thread and self.tts_thread.is_alive():
+                    self.tts_thread.join(timeout=0.5)
+            except Exception:
+                pass
+            try:
                 self.stt.close()
-            with self._suppress_ex():
-                if self.use_motor and self.motor:
-                    # 次回以降も継続利用するため解放せず停止のみにする
-                    try:
-                        self.motor.stop_motion()
-                    except Exception:
-                        pass
+            except Exception:
+                pass
+            try:
                 if self.use_led and self.led:
-                    # 確実にLEDを停止・消灯・解放
-                    try:
-                        self.led.stop_blink(wait=True)
-                    except Exception:
-                        pass
-                    try:
-                        self.led.off()
-                    except Exception:
-                        pass
-
-    def _ensure_devices_ready(self) -> None:
-        # LED がクリーンアップ済み、もしくは存在しない場合に再生成
-        if self.use_led:
-            try:
-                need_recreate_led = (
-                    self.led is None or
-                    bool(getattr(self.led, "_cleaned", False))
-                )
+                    self.led.stop_blink(wait=True)
+                    self.led.off()
             except Exception:
-                need_recreate_led = True
-            if need_recreate_led:
-                try:
-                    from function_led import LEDBlinker
-                    self.led = LEDBlinker(self.led_pin)
-                except Exception as e:
-                    print(f"LED再初期化に失敗しました: {e}")
-                    self.use_led = False
-                    self.led = None
+                pass
 
-        # Motor がクリーンアップ済み、または pigpio が閉じている場合は再生成
-        if self.use_motor:
+    # ---------- tts control ----------
+    def stop_tts(self) -> None:
+        try:
+            self.tts.stop()
+        except Exception:
+            pass
+
+    def speak_async(self, text: str) -> None:
+        # 進行中があれば停止
+        with self.tts_lock:
+            self.stop_tts()
+            # 再生停止の完了を待つ（短時間）
             try:
-                pi_obj = getattr(self.motor, "pi", None)
-                need_recreate_motor = (
-                    self.motor is None or
-                    bool(getattr(self.motor, "_cleaned", False)) or
-                    pi_obj is None or
-                    (hasattr(pi_obj, "connected") and not getattr(pi_obj, "connected", False))
-                )
-            except Exception:
-                need_recreate_motor = True
-            if need_recreate_motor:
+                # まずはスレッドの終了を待機
+                if self.tts_thread and self.tts_thread.is_alive():
+                    self.tts_thread.join(timeout=1.0)
+            except Exception as e:
+                print(f"TTSスレッド終了エラー: {e}")
+            
+            def _run():
                 try:
-                    from function_motor import Motor
-                    self.motor = Motor(self.pan_pin, self.tilt_pin)
+                    self.tts.speak(text, self.led, self.use_led, self.motor, self.use_motor, corr_gate=self.corr_gate)
                 except Exception as e:
-                    print(f"モーター再初期化に失敗しました: {e}")
-                    self.use_motor = False
-                    self.motor = None
+                    print(f"TTSエラー: {e}")
 
-    # ----------------- 補助メソッド -----------------
+            self.tts_thread = threading.Thread(target=_run, daemon=True)
+            self.tts_thread.start()
 
-    @staticmethod
-    def load_stt(stt_type: str) -> Union[AzureSpeechToText, GoogleSpeechToText]:
-        if stt_type == "azure":
-            return AzureSpeechToText()
-        elif stt_type == "google":
-            return GoogleSpeechToText()
-        else:
-            raise ValueError(f"Invalid STT type: {stt_type}")
-
-    @staticmethod
-    def _suppress_ex():
-        class _Ctx:
-            def __enter__(self):
-                return self
-            def __exit__(self, exc_type, exc, tb):
-                return True
-        return _Ctx()
-
-    # ----------------- 会話ロジック -----------------
-    # 終了コマンドチェック
+    # ---------- 会話ロジック ----------
     def check_farewell(self, txt: str) -> bool:
-        if self.check_end_command(txt):
+        if self.farewell_word_pattern.match(txt):
             farewell = "バイバイ！"
             print(f"{self.your_name}: {farewell}")
             with self._suppress_ex():
@@ -516,38 +242,14 @@ class HaloApp:
             return True
         return False
 
-    def exec_stt(self, stt: Union[AzureSpeechToText, GoogleSpeechToText]) -> str:
-        print("--- 音声入力待ち ---")
-        try:
-            user_text = stt.listen_once()
-            return user_text
-        except KeyboardInterrupt:
-            print("\n音声認識を中断しました。")
-            raise
-
-    @staticmethod
-    def check_end_command(user_text: str) -> bool:
-        return any(k in user_text for k in ("終了", "バイバイ", "さようなら"))
-
-    def move_pan_kyoro_kyoro(self, speed: float = 1, count: int = 1):
-        if self.use_motor and self.motor:
-            self.motor.pan_kyoro_kyoro(80, 100, speed, count)
-
-    def move_tilt_kyoro_kyoro(self, count: int = 1):
-        if self.use_motor and self.motor:
-            self.motor.motor_kuchipaku()
-
-    def say_filler(self, user_text: str):
-        if "終了" in user_text:
-            return
-        if self.isfiller:
-            if self.use_led and self.led:
-                self.led.start_blink()
-            self.move_tilt_kyoro_kyoro(2)
-            self.move_pan_kyoro_kyoro(1, 2)
-            if self.player:
-                self.player.random_play(block=False)
-            print("filler再生中")
+    def check_sentence(self, user_text: str, response: str) -> bool:
+        if self.is_similarity_threshold(user_text, response):
+            print(f"類似度がしきい値を超えています :txt: {txt} :response: {response}")
+            return True
+        if self.is_coherence_threshold(user_text, self.coherence_threshold):
+            print(f"破綻がしきい値を超えています :txt: {txt} :threshold: {threshold}")
+            return True
+        return False
 
     def is_similarity_threshold(self, user_text: str, response: str) -> bool:
         # 類似度（ユーザ確定テキスト vs 応答テキストの一部）
@@ -556,15 +258,33 @@ class HaloApp:
             # print(f"類似度計算 :user_text: {user_text} :response: {self.response}")
             score, best_sub = self.similarity.calc_max_substring_similarity(user_text, self.response)
             print(f"類似度: {score * 100:.1f}%  一致抜粋: {best_sub[:80]}")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"類似度計算エラー: {e}")
         return score >= self.similarity_threshold
 
-    
+    def is_coherence_threshold(self, txt: str, threshold: float) -> bool:
+        # 文章の破綻度
+        try:
+            is_noisy, score = self.asr_coherence_filter.is_noisy(txt, threshold)
+        except Exception as e:
+            print(f"破綻度計算エラー: {e}")
+            return False
+        # 完全に0の時は文中にハテナがあるなど
+        if score == 0.0:
+            is_noisy = False
+        if is_noisy:
+            return True
+        return False
 
-
+    # ---------- STT ----------
+    def load_stt(self,stt_type: str) -> Union[AzureSpeechToText, GoogleSpeechToText]:
+        if stt_type == "azure":
+            return AzureSpeechToText()
+        elif stt_type == "google":
+            return GoogleSpeechToText()
+        else:
+            raise ValueError(f"Invalid STT type: {stt_type}")
 
 if __name__ == "__main__":
-    app = HaloApp()
-    app.main_loop()
-    #app.run()
+    halo = Halo()
+    halo.run()

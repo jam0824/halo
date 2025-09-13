@@ -2,9 +2,10 @@
   "owner_name": "まつ",
   "your_name": "ハロ",
   "stt": "azure",
-  "llm": "gpt-4.1-nano",
+  "llm": "gpt-4o-mini",
   "one_time_run": true,
   "wakeup_word": ".*(ハロ|しゃべり|喋|話).*",
+  "farewell_word": ".*(バイバイ|さようなら|終了).*",
   "run_timeout_sec": 120,
   "voiceVoxTTS": {
     "base_url": "http://192.168.1.151:50021",
@@ -31,10 +32,11 @@
   "vad":{
     "samplereate": 16000,
     "frame_duration_ms": 20,
-    "min_consecutive_speech_frames": 12,
+    "min_consecutive_speech_frames": 8,
     "corr_threshold": 0.50,
     "max_lag_ms": 95,
-    "cooldown_ms": 1000
+    "cooldown_ms": 1000,
+    "aggressiveness": 3
   },
   "interrupt_word": ".*(待って|待|そうだ|えっと|いいね|そうそう|止めて|とめて|終了).*",
   "similarity_threshold": 0.70,
