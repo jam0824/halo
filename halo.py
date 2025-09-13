@@ -8,13 +8,13 @@ from command_selector import CommandSelector
 from llm import LLM
 from stt_azure import AzureSpeechToText
 from stt_google import GoogleSpeechToText
-from corr_gate import CorrelationGate
-from asr_coherence import ASRCoherenceFilter
 from voicevox import VoiceVoxTTS
-from vad import VAD
-from similarity import TextSimilarity
-from filler import Filler
 
+from helper.filler import Filler
+from helper.corr_gate import CorrelationGate
+from helper.asr_coherence import ASRCoherenceFilter
+from helper.vad import VAD
+from helper.similarity import TextSimilarity
 
 if TYPE_CHECKING:
     from function_led import LEDBlinker
