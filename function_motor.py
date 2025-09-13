@@ -206,7 +206,7 @@ class Motor:
                 if self._pan_stop_event.is_set():
                     return True
                 t = i / steps
-                p = ease_in_out_sine(t)
+                p = t
                 angle = start + (end - start) * p
                 if self._cleaned:
                     return True
@@ -255,7 +255,7 @@ class Motor:
                 if self._tilt_stop_event.is_set():
                     return True
                 t = i / steps
-                p = ease_in_out_sine(t)
+                p = t
                 angle = start + (end - start) * p
                 if self._cleaned:
                     return True

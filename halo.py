@@ -216,6 +216,7 @@ class Halo:
             
             def _run():
                 try:
+                    self.move_pan_kyoro_kyoro(1, 2)
                     self.tts.speak(text, self.led, self.use_led, self.motor, self.use_motor, corr_gate=self.corr_gate)
                 except Exception as e:
                     print(f"TTSエラー: {e}")
@@ -289,10 +290,11 @@ class Halo:
             except Exception as e:
                 print(f"モーター停止エラー: {e}")
         return
+    # pan動作
     def move_pan_kyoro_kyoro(self, speed: float = 1, count: int = 1):
         if self.use_motor and self.motor:
             self.motor.pan_kyoro_kyoro(80, 100, speed, count)
-
+    # tilt動作
     def move_tilt_kyoro_kyoro(self, count: int = 1):
         if self.use_motor and self.motor:
             self.motor.motor_kuchipaku()
