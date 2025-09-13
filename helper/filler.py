@@ -1,4 +1,4 @@
-from wav_player import WavPlayer
+from helper.wav_player import WavPlayer
 
 class Filler:
     player = None
