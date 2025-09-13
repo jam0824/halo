@@ -1,36 +1,89 @@
-import pigpio
 import math
 from time import sleep
 import threading
+from rpi_hardware_pwm import HardwarePWM  # ★追加
 
+class HardwareServo:
+    """
+    ハードウェアPWMでサーボを駆動する薄いラッパ。
+    - 周期(frame_width_s)は既定 20ms（=50Hz）
+    - パルス幅(min/max)を ns に変換して duty を設定
+    """
+    def __init__(self, pwm_channel:int, frame_width_s:float=0.02,
+                 min_pulse_s:float=0.0005, max_pulse_s:float=0.0025, chip:int=0):
+        self.frame_width_s = float(frame_width_s)
+        self.min_pulse_s   = float(min_pulse_s)
+        self.max_pulse_s   = float(max_pulse_s)
+        self._hz = max(1, int(round(1.0 / self.frame_width_s)))  # 50Hz想定
+        # Pi 5 のチャネル割当:
+        #  ch 0→GPIO12, ch 1→GPIO13, ch 2→GPIO18, ch 3→GPIO19  (rpi-hardware-pwmの説明に準拠)
+        self._pwm = HardwarePWM(pwm_channel=int(pwm_channel), hz=self._hz, chip=int(chip))
+        self._running = False
+
+    def start(self, pulse_s:float):
+        duty = max(0.0, min(100.0, (pulse_s / self.frame_width_s) * 100.0))
+        if not self._running:
+            self._pwm.start(duty)
+            self._running = True
+        else:
+            self._pwm.change_duty_cycle(duty)
+
+    def set_pulse(self, pulse_s:float):
+        self.start(pulse_s)
+
+    def stop(self):
+        if self._running:
+            try:
+                self._pwm.stop()
+            finally:
+                self._running = False
+
+    def close(self):
+        self.stop()
 
 class Motor:
     PAN_START_ANGLE = 90
     TILT_START_ANGLE = 90
-    def __init__(self, pan_pin:int = 12, tilt_pin:int = 25, frequency:int = 50, invert_pan:bool=False, invert_tilt:bool=False):
-        self.pan_pin = pan_pin
-        self.tilt_pin = tilt_pin
-        self.frequency = frequency  # pigpioのset_servo_pulsewidthは周波数指定不要
-        # サーボ用パルス幅(us)
-        self._min_pulse_us = 500
-        self._max_pulse_us = 2500
+
+    def __init__(self, pan_pin:int = 18, tilt_pin:int = 19,  # ← ★GPIO18/19に変更（BCM）
+                 frequency:int = 50, invert_pan:bool=False, invert_tilt:bool=False,
+                 frame_width_s: float = 0.02, hold_servo: bool = True,
+                 angle_step_deg: float = 1.0, min_delta_deg: float = 0.7):
+        # 角度→パルス幅
+        self._min_pulse_s = 0.0005
+        self._max_pulse_s = 0.0025
         self._min_angle = 0.0
         self._max_angle = 180.0
         self._invert_pan = bool(invert_pan)
         self._invert_tilt = bool(invert_tilt)
-        # 直近に指示した角度を保持（イージングの始点に利用）
-        self._pan_angle: float = float(self.PAN_START_ANGLE)
-        self._tilt_angle: float = float(self.TILT_START_ANGLE)
+        self._frame_width_s = float(frame_width_s)  # 20ms=50Hz
+        self._hold = bool(hold_servo)
+        self._angle_step_deg = max(0.1, float(angle_step_deg))
+        self._min_delta_deg = max(0.0, float(min_delta_deg))
+        self._pan_angle = float(self.PAN_START_ANGLE)
+        self._tilt_angle = float(self.TILT_START_ANGLE)
         self._cleaned = False
-        self._pan_thread: threading.Thread | None = None
-        self._tilt_thread: threading.Thread | None = None
+        self._pan_thread = None
+        self._tilt_thread = None
         self._pan_stop_event = threading.Event()
         self._tilt_stop_event = threading.Event()
-        self.pi = pigpio.pi()
-        if not self.pi.connected:
-            raise RuntimeError("pigpio daemon (pigpiod) に接続できませんでした。pigpiod を起動してください。")
+
+        # BCMピン→PWMチャネル対応（Pi 5 / rpi-hardware-pwm 準拠）
+        bcm_to_channel = {12:0, 13:1, 18:2, 19:3}
+
+        def servo_for_bcm(bcm_pin:int) -> HardwareServo:
+            if bcm_pin not in bcm_to_channel:
+                raise ValueError(f"GPIO{bcm_pin} はハードPWM非対応です。GPIO12/13/18/19から選んでください。")
+            ch = bcm_to_channel[bcm_pin]
+            return HardwareServo(pwm_channel=ch, frame_width_s=self._frame_width_s,
+                                 min_pulse_s=self._min_pulse_s, max_pulse_s=self._max_pulse_s, chip=0)
+
+        # ★AngularServo をやめ、ハードPWMラッパに置換
+        self._servo_pan  = servo_for_bcm(int(pan_pin))
+        self._servo_tilt = servo_for_bcm(int(tilt_pin))
+
         self.init_position(self.PAN_START_ANGLE, self.TILT_START_ANGLE)
-    
+
     def __del__(self):
         try:
             self.clean_up()
@@ -40,9 +93,7 @@ class Motor:
     def clean_up(self):
         if self._cleaned:
             return
-        # 以降の新規操作を抑止
         self._cleaned = True
-        # 要求停止を出して実行中のスレッドを終了させる
         try:
             self._pan_stop_event.set()
             self._tilt_stop_event.set()
@@ -52,29 +103,15 @@ class Motor:
                 self._tilt_thread.join()
         except Exception:
             pass
-        try:
-            # サーボ信号を停止
+        for s in (self._servo_pan, self._servo_tilt):
             try:
-                self.pi.set_servo_pulsewidth(self.pan_pin, 0)
+                s.stop()
             except Exception:
                 pass
-        except Exception:
-            pass
-        try:
             try:
-                self.pi.set_servo_pulsewidth(self.tilt_pin, 0)
+                s.close()
             except Exception:
                 pass
-        except Exception:
-            pass
-        try:
-            self.pi.stop()
-        except Exception:
-            pass
-        try:
-            self.pi = None
-        except Exception:
-            pass
 
     def __enter__(self):
         return self
@@ -82,35 +119,48 @@ class Motor:
     def __exit__(self, exc_type, exc, tb):
         self.clean_up()
         return False
-        
+
+    def _angle_to_pulse(self, angle:float) -> float:
+        # 0°→min_pulse, 180°→max_pulse の線形マップ
+        a = max(self._min_angle, min(self._max_angle, float(angle)))
+        ratio = (a - self._min_angle) / (self._max_angle - self._min_angle)
+        return self._min_pulse_s + (self._max_pulse_s - self._min_pulse_s) * ratio
+
     def init_position(self, pan_angle:float=0, tilt_angle:float=0):
         self.change_pan_angle(pan_angle)
         self.change_tilt_angle(tilt_angle)
-    def _angle_to_pulsewidth(self, angle:float) -> int:
-        # 角度を安全にクリップ
-        a = max(self._min_angle, min(self._max_angle, float(angle)))
-        span_us = self._max_pulse_us - self._min_pulse_us
-        span_deg = self._max_angle - self._min_angle
-        pw = self._min_pulse_us + (a - self._min_angle) * span_us / span_deg
-        return int(round(pw))
-    
+
+    def _quantize(self, angle: float) -> float:
+        step = self._angle_step_deg
+        return round(angle / step) * step
+
     def change_pan_angle(self, angle:float):
-        if self._cleaned or self.pi is None:
+        if self._cleaned:
             return
         adj = (self._max_angle - float(angle)) if self._invert_pan else float(angle)
+        adj_q = self._quantize(adj)
+        if abs(adj_q - getattr(self, "_last_pan_set", self._pan_angle)) < self._min_delta_deg:
+            self._pan_angle = float(angle)
+            return
         self._pan_angle = float(angle)
         try:
-            self.pi.set_servo_pulsewidth(self.pan_pin, self._angle_to_pulsewidth(adj))
+            self._servo_pan.set_pulse(self._angle_to_pulse(adj_q))
+            self._last_pan_set = adj_q
         except Exception:
             pass
-    
+
     def change_tilt_angle(self, angle:float):
-        if self._cleaned or self.pi is None:
+        if self._cleaned:
             return
         adj = (self._max_angle - float(angle)) if self._invert_tilt else float(angle)
+        adj_q = self._quantize(adj)
+        if abs(adj_q - getattr(self, "_last_tilt_set", self._tilt_angle)) < self._min_delta_deg:
+            self._tilt_angle = float(angle)
+            return
         self._tilt_angle = float(angle)
         try:
-            self.pi.set_servo_pulsewidth(self.tilt_pin, self._angle_to_pulsewidth(adj))
+            self._servo_tilt.set_pulse(self._angle_to_pulse(adj_q))
+            self._last_tilt_set = adj_q
         except Exception:
             pass
 
@@ -156,7 +206,7 @@ class Motor:
                 if self._pan_stop_event.is_set():
                     return True
                 t = i / steps
-                p = t
+                p = ease_in_out_sine(t)
                 angle = start + (end - start) * p
                 if self._cleaned:
                     return True
@@ -178,6 +228,12 @@ class Motor:
             current = float(right_angle)
         # 最後にスタート角へ戻す
         move_ease(current, float(self.PAN_START_ANGLE), float(duration))
+        # アイドル時はデタッチしてジッター抑制
+        if not self._hold:
+            try:
+                self._servo_pan.detach()
+            except Exception:
+                pass
 
     def _tilt_worker(self, up_angle:float, down_angle:float, duration:float, count:int=1):
         if self._cleaned:
@@ -185,17 +241,42 @@ class Motor:
         self._tilt_stop_event.clear()
         if self._tilt_stop_event.is_set():
             return
+        base_interval = 0.02
+
+        def ease_in_out_sine(t: float) -> float:
+            return 0.5 * (1 - math.cos(math.pi * t))
+
+        def move_ease(start: float, end: float, seconds: float) -> bool:
+            if seconds <= 0:
+                self.change_tilt_angle(end)
+                return self._tilt_stop_event.is_set()
+            steps = max(1, int(seconds / base_interval))
+            for i in range(1, steps + 1):
+                if self._tilt_stop_event.is_set():
+                    return True
+                t = i / steps
+                p = ease_in_out_sine(t)
+                angle = start + (end - start) * p
+                if self._cleaned:
+                    return True
+                self.change_tilt_angle(angle)
+                if self._sleep_with_cancel(base_interval, self._tilt_stop_event):
+                    return True
+            return self._tilt_stop_event.is_set()
+
+        current = float(self._tilt_angle)
         for _ in range(max(1, int(count))):
-            if self._cleaned:
+            if move_ease(current, float(up_angle), float(duration)):
                 return
-            self.change_tilt_angle(up_angle)
-            if self._sleep_with_cancel(duration, self._tilt_stop_event):
+            current = float(up_angle)
+            if move_ease(current, float(down_angle), float(duration)):
                 return
-            if self._cleaned:
-                return
-            self.change_tilt_angle(down_angle)
-            if self._sleep_with_cancel(duration, self._tilt_stop_event):
-                return
+            current = float(down_angle)
+        if not self._hold:
+            try:
+                self._servo_tilt.detach()
+            except Exception:
+                pass
 
     def pan_kyoro_kyoro(self, left_angle:float, right_angle:float, time:float, count:int=1):
         if self._cleaned:
@@ -255,6 +336,28 @@ class Motor:
                 self._tilt_stop_event.clear()
             except Exception:
                 pass
+            if not self._hold:
+                try:
+                    self._servo_pan.detach()
+                except Exception:
+                    pass
+                try:
+                    self._servo_tilt.detach()
+                except Exception:
+                    pass
+
+    def set_hold(self, hold: bool):
+        self._hold = bool(hold)
+
+    def detach(self):
+        try:
+            self._servo_pan.detach()
+        except Exception:
+            pass
+        try:
+            self._servo_tilt.detach()
+        except Exception:
+            pass
 
     def motor_kuchipaku(self):
         """

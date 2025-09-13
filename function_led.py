@@ -1,21 +1,16 @@
 import time
 import threading
-import RPi.GPIO as GPIO
+from gpiozero import LED
 
 
 class LEDBlinker:
-  def __init__(self, pin: int = 17, use_bcm: bool = True):
+  def __init__(self, pin: int = 27):
     self.pin = int(pin)
-    self._stop_event = threading.Event()
-    self._thread = None
     self._lock = threading.RLock()
     self._cleaned = False
-
-    if use_bcm:
-      GPIO.setmode(GPIO.BCM)
-    else:
-      GPIO.setmode(GPIO.BOARD)
-    GPIO.setup(self.pin, GPIO.OUT, initial=GPIO.LOW)
+    self._led = LED(self.pin)
+    self._last_on = 0.3
+    self._last_off = 0.3
 
   # コンテキスト管理
   def __enter__(self):
@@ -29,69 +24,69 @@ class LEDBlinker:
   def on(self):
     if self._cleaned:
       return
-    self.stop_blink()
-    self._safe_output(GPIO.HIGH)
+    with self._lock:
+      self._safe_off()
+      self._safe_on()
 
   def off(self):
     if self._cleaned:
       return
-    self.stop_blink()
-    self._safe_output(GPIO.LOW)
+    with self._lock:
+      self._safe_off()
 
   def start_blink(self, on_sec: float = 0.3, off_sec: float = 0.3):
+    if self._cleaned:
+      return
     with self._lock:
-      if self._cleaned:
-        return
-      self.stop_blink()
-      self._stop_event.clear()
-
-      def _run():
-        try:
-          while not self._stop_event.is_set():
-            self._safe_output(GPIO.HIGH)
-            if self._stop_event.wait(on_sec):
-              break
-            self._safe_output(GPIO.LOW)
-            if self._stop_event.wait(off_sec):
-              break
-        finally:
-          self._safe_output(GPIO.LOW)
-
-      self._thread = threading.Thread(target=_run, daemon=True)
-      self._thread.start()
+      self._last_on = float(on_sec)
+      self._last_off = float(off_sec)
+      try:
+        self._led.blink(on_time=self._last_on, off_time=self._last_off, background=True)
+      except Exception:
+        pass
 
   def stop_blink(self, wait: bool = False):
+    if self._cleaned:
+      return
     with self._lock:
-      if self._thread and self._thread.is_alive():
-        self._stop_event.set()
+      try:
+        # blinkスレッドは off() で停止する
+        self._led.off()
         if wait:
-          self._thread.join(timeout=1.0)
-        self._thread = None
-        self._stop_event.clear()
+          # 簡易的に直前の周期分だけ待機
+          time.sleep(min(1.0, self._last_on + self._last_off))
+      except Exception:
+        pass
 
   def cleanup(self):
     # ブリンク停止とGPIO解放
-    self.stop_blink(wait=True)
-    self._cleaned = True
+    if self._cleaned:
+      return
     try:
-      self._safe_output(GPIO.LOW)
+      self.stop_blink(wait=True)
     except Exception:
       pass
+    self._cleaned = True
     try:
-      # ピン単体のクリーンアップ（環境によっては全体cleanup()でもOK）
-      GPIO.cleanup(self.pin)
+      self._led.close()
     except Exception:
       pass
 
-  def _safe_output(self, level):
+  # 内部安全呼び出し
+  def _safe_on(self):
     try:
-      GPIO.output(self.pin, level)
+      self._led.on()
+    except Exception:
+      pass
+
+  def _safe_off(self):
+    try:
+      self._led.off()
     except Exception:
       pass
 
 
 if __name__ == "__main__":
-  # 簡易デモ（非ブロッキングで点滅しつつ、他処理を継続）
   try:
     with LEDBlinker(pin=17) as led:
       print("boot", flush=True)
