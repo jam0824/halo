@@ -16,7 +16,10 @@
     "pitchScale": 0.0,
     "intonationScale": 1.0
   },
-  "use_filler": false,
+  "filler":{
+    "use_filler": true,
+    "filler_dir": "./filler"
+  },
   "led":{
     "use_led": false,
     "led_pin": 27
@@ -32,7 +35,7 @@
   "vad":{
     "samplereate": 16000,
     "frame_duration_ms": 20,
-    "min_consecutive_speech_frames": 8,
+    "min_consecutive_speech_frames": 6,
     "corr_threshold": 0.50,
     "max_lag_ms": 95,
     "cooldown_ms": 1000,
