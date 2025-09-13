@@ -164,8 +164,7 @@ class Halo:
                     self.response, self.command = self.halo_helper.get_halo_response(response_text)
                     self.history = self.halo_helper.append_history(self.history, self.your_name, self.response)
                     # コマンドがあれば実行
-                    if self.command != {}:
-                        self.command_selector.exec_command(self.command["key"], self.command["value"])
+                    self.exec_command(self.command)
                     
 
                     # 応答読み上げは非同期で行う
@@ -224,6 +223,25 @@ class Halo:
 
             self.tts_thread = threading.Thread(target=_run, daemon=True)
             self.tts_thread.start()
+    # ---------- コマンド実行 ----------
+    def exec_command(self, command: dict) -> str:
+        if self.command == {}:
+            return
+        fut = self.command_selector.exec_command(command["key"], command["value"])
+        if fut:
+            def _on_done(f):
+                try:
+                    result = f.result()
+                    if result:
+                        system_content = "この内容を3行程度でシンプルに要約してください。"
+                        response_text = self.llm.generate_text(self.llm_model, result['result'], system_content, "")
+                        self.response = response_text
+                        self.history = self.halo_helper.append_history(self.history, self.your_name, self.response)
+                        print(f"[command_response] {self.response}")
+                        self.speak_async(self.response)
+                except Exception as e:
+                    print(f"[command_error] {e}")
+            fut.add_done_callback(_on_done)
 
     # ---------- 会話ロジック ----------
     def check_farewell(self, txt: str) -> bool:

@@ -49,12 +49,13 @@ class CommandSelector:
         return key
     
     def exec_command(self, key: str, text: str) -> str:
+        result = None
         if key == "browser":
-            bc = BrowserController()
-            bc.send_async(text)
+            self._bc = getattr(self, "_bc", BrowserController())  # 使い回し
+            return self._bc.send_async(text)  # Futureを返す
         else:
             print(f"[selector] {key} コマンドを検出: text='{text}'")
-        return key
+            return None
 
 
 if __name__ == "__main__":
