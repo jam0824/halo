@@ -134,6 +134,25 @@ class Halo:
             print("VAD detected")
         return is_vad
 
+    def main_loop(self) -> None:
+        self.speak_async("ハロ、起動した")
+        self.run()
+        time.sleep(1)
+        self.speak_async("ハロ、待機モード")
+        while True:
+            if not self.is_vad(self.config):
+                time.sleep(0.1)
+                continue
+            first_text = self.stt.listen_once()
+            if not self.wakeup_word_pattern.match(first_text):
+                print("ウェイクアップキーワードが含まれていません")
+                time.sleep(0.1)
+                continue
+            self.speak_async("ハロ、おしゃべりする！")
+            self.run()
+            time.sleep(1)
+            self.speak_async("ハロ、待機モード")
+
     def run(self) -> None:
         print("========== 話しかけてください。Ctrl+Cで終了します。 ==========")
         time_out = time.time() + self.run_timeout_sec
@@ -249,6 +268,7 @@ class Halo:
             fut.add_done_callback(_on_done)
 
     # ---------- 会話ロジック ----------
+
     def check_farewell(self, txt: str) -> bool:
         if self.farewell_word_pattern.match(txt):
             farewell = "バイバイ！"
@@ -334,4 +354,4 @@ class Halo:
 
 if __name__ == "__main__":
     halo = Halo()
-    halo.run()
+    halo.main_loop()
