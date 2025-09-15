@@ -1,9 +1,13 @@
 import json
+import asyncio
+import threading
+from concurrent.futures import Future
 import re
 from pathlib import Path
 from typing import Dict, List, Optional, Pattern, Tuple
 from playwright.controller_browser import BrowserController
 
+from mcp.mcp_call import MCPClient
 
 class CommandSelector:
     """
@@ -16,6 +20,15 @@ class CommandSelector:
         self.config_path: str = config_path
         self.listRules: List[Tuple[str, Pattern[str]]] = []
         self._load_config()
+        self.mcp_client = MCPClient()
+        self._loop = None  # type: Optional[asyncio.AbstractEventLoop]
+        self._loop_thread = None  # type: Optional[threading.Thread]
+
+    def _ensure_loop(self) -> None:
+        if self._loop is None:
+            self._loop = asyncio.new_event_loop()
+            self._loop_thread = threading.Thread(target=self._loop.run_forever, daemon=True)
+            self._loop_thread.start()
 
     def _load_config(self) -> None:
         path = Path(self.config_path)
@@ -44,18 +57,38 @@ class CommandSelector:
         if key is None:
             print("[selector] マッチするコマンドがありませんでした")
             return None
-        
-        self.exec_command(key, text)
+        # 現状はテキスト全体を MCP に渡す
+        self.exec_command(text)
         return key
     
-    def exec_command(self, key: str, text: str) -> str:
-        result = None
-        if key == "browser":
-            self._bc = getattr(self, "_bc", BrowserController())  # 使い回し
-            return self._bc.send_async(text)  # Futureを返す
+    def exec_command(self, command) -> Future:
+        """コマンドを非同期ループに投げて concurrent.futures.Future を返す。
+
+        - `halo.py` 側の `add_done_callback` で受け取れるよう、結果は `{ "result": <str> }` 形式で返す。
+        - `command` が dict の場合は、代表テキストを推測して抽出する。
+        """
+        self._ensure_loop()
+
+        if isinstance(command, dict):
+            # 代表テキストを推測（なければJSON文字列）
+            text = (
+                command.get("mcp_query")
+                or command.get("query")
+                or command.get("text")
+                or command.get("content")
+                or command.get("command")
+            )
+            if not text:
+                text = json.dumps(command, ensure_ascii=False)
         else:
-            print(f"[selector] {key} コマンドを検出: text='{text}'")
-            return None
+            text = str(command)
+
+        async def _task():
+            out = await self.mcp_client.call(text)
+            return {"result": out}
+
+        # ループスレッド上で実行し、concurrent.futures.Future を返す
+        return asyncio.run_coroutine_threadsafe(_task(), self._loop)
 
 
 if __name__ == "__main__":
