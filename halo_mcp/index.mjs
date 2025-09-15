@@ -20,7 +20,7 @@ const playwright = new MCPServerStreamableHttp({
 });
 
 // Spotify（オプション）— uv が未インストールでもスキップ可能に
-const spotifyFullCommand = process.env.SPOTIFY_MCP_FULLCOMMAND || "uv --directory D:/codes/spotify-mcp run spotify-mcp";
+const spotifyFullCommand = process.env.SPOTIFY_MCP_FULLCOMMAND || "uv --directory ../spotify-mcp run spotify-mcp";
 const spotify = new MCPServerStdio({
   name: "spotify",
   fullCommand: spotifyFullCommand,

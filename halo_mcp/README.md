@@ -2,6 +2,7 @@
 
 ## install
 ```
+sudo apt install nodejs npm
 npm i @openai/agents
 pip install "mcp[cli]"
 curl -LsSf https://astral.sh/uv/install.sh | sh
