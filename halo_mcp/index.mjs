@@ -20,21 +20,15 @@ const playwright = new MCPServerStreamableHttp({
 });
 
 // Spotify（オプション）— uv が未インストールでもスキップ可能に
-const spotifyFullCommand = process.env.SPOTIFY_MCP_FULLCOMMAND || "uv --directory ../spotify-mcp run spotify-mcp";
 const spotify = new MCPServerStdio({
   name: "spotify",
-  fullCommand: spotifyFullCommand,
-  env: {
-    SPOTIFY_CLIENT_ID: process.env.SPOTIFY_CLIENT_ID,
-    SPOTIFY_CLIENT_SECRET: process.env.SPOTIFY_CLIENT_SECRET,
-    SPOTIFY_REDIRECT_URI: "http://127.0.0.1:8080/callback",
-  },
+  fullCommand: "node ../spotify-mcp-server/build/index.js",
 });
 
 // switchbotで電気をオンオフするMCPサーバー
 const switchbot = new MCPServerStdio({
   name: "switchbot", // ← エージェント側での識別名（自由）
-  fullCommand: "uv --directory ./halo_mcp run python switchbot.py",
+  fullCommand: "python ./halo_mcp/switchbot.py",
   env: {
     // 念のためバッファ無効で安定化
     PYTHONUNBUFFERED: "1",

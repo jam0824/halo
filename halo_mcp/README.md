@@ -26,12 +26,9 @@ powershellの永続化例
 
 ## Spotifyの設定
 ```
-git clone https://github.com/varunneal/spotify-mcp.git
-cd spotify-mcp
-# 依存を同期して実行テスト
-uv sync
-uv run spotify-mcp --help
+git clone https://github.com/marcelmarais/spotify-mcp-server
 ```
+リポジトリを確認して、setupとauthを終えること。
 
 
 ## Playwright実行側(サーバー側)設定
