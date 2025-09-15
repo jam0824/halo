@@ -27,6 +27,7 @@ class Halo:
 
         self.owner_name: str = self.config["owner_name"]
         self.your_name: str = self.config["your_name"]
+        self.run_timeout_sec: int = self.config["run_timeout_sec"]
         self.stt_type: str = self.config["stt"]
         self.llm_model: str = self.config["llm"]
         self.tts_config: dict = self.config["voiceVoxTTS"]
@@ -135,10 +136,14 @@ class Halo:
 
     def run(self) -> None:
         print("========== 話しかけてください。Ctrl+Cで終了します。 ==========")
+        time_out = time.time() + self.run_timeout_sec
 
         try:
             while True:
                 try:
+                    if time.time() >= time_out:
+                        print(f"タイムアウト({self.run_timeout_sec}s)により終了します。")
+                        break
                     # VADで発話を検出
                     if not self.is_vad(self.config):
                         time.sleep(0.1)
@@ -169,6 +174,8 @@ class Halo:
 
                     # 応答読み上げは非同期で行う
                     self.speak_async(self.response)
+                    time_out = time.time() + self.run_timeout_sec    # タイムアウト時間を更新
+
                 except KeyboardInterrupt:
                     print("\n\n音声認識ループが中断されました")
                     break
