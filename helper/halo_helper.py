@@ -77,21 +77,10 @@ class HaloHelper:
         return history
 
     # jsonからハロ発話を抽出
-    def get_halo_response(self, text: str) -> tuple[str, dict]:
-        response = ""
-        command = {}
+    def get_halo_response(self, text: str) -> tuple[str, str]:
         print(f"Response: {text}")
         responses = text.split("\n")
         if len(responses) == 1:
-            return responses[0], {}
-        
-        response = responses[0]
-        tmp_command = responses[1].split(":")
-        if len(tmp_command) >= 2:
-            command["key"] = tmp_command[0]
-            command["value"] = tmp_command[1]
-        else:
-            command = {}
-
-
-        return response, command
+            return responses[0], ""
+        # 1行目がメッセージ、2行目がコマンド
+        return responses[0], responses[1]
