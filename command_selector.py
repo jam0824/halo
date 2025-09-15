@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Pattern, Tuple
 from playwright.controller_browser import BrowserController
 
-from mcp.mcp_call import MCPClient
+from halo_mcp.mcp_call import MCPClient
 
 class CommandSelector:
     """

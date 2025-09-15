@@ -31,6 +31,16 @@ const spotify = new MCPServerStdio({
   },
 });
 
+// switchbotで電気をオンオフするMCPサーバー
+const switchbot = new MCPServerStdio({
+  name: "switchbot", // ← エージェント側での識別名（自由）
+  fullCommand: "uv --directory ./halo_mcp run python switchbot.py",
+  env: {
+    // 念のためバッファ無効で安定化
+    PYTHONUNBUFFERED: "1",
+  },
+});
+
 async function connectSafe(server, name) {
   try {
     await server.connect();
@@ -42,6 +52,7 @@ async function connectSafe(server, name) {
 }
 
 const listServers = [];
+listServers.push(await connectSafe(switchbot, "switchbot"));
 listServers.push(await connectSafe(brave, "brave"));
 listServers.push(await connectSafe(playwright, "playwright"));
 listServers.push(await connectSafe(spotify, "spotify"));
@@ -56,13 +67,15 @@ try {
 - Web/ニュース/画像の検索: 「brave」
 - 実ブラウザ操作: 「playwright」
 - 音楽の検索/再生/キュー/プレイリスト操作: 「spotify」
-- 出典URLや実行手順を簡潔に示し、日本語で答える。`,
+- 電気の操作: 「switchbot」
+- 出典URLや実行手順を簡潔に示し、日本語で答える。
+- あなたはガンダムのハロです。ハロ、電気をつけた。など片言で返信する。`,
     mcpServers: activeServers,
   });
 
   const query =
     process.argv[2] ??
-    "https://news.ycombinator.com にアクセスして 'new' を開き、タイトルを3件教えて";
+    "switchbotで電気をオン";
   const result = await run(agent, query);
 
   process.stdout.write(JSON.stringify({ output: result.finalOutput }) + "\n");
@@ -74,5 +87,6 @@ try {
   if (activeServers.includes(brave)) listToClose.push(brave.close());
   if (activeServers.includes(playwright)) listToClose.push(playwright.close());
   if (activeServers.includes(spotify)) listToClose.push(spotify.close());
+  if (activeServers.includes(switchbot)) listToClose.push(switchbot.close());
   await Promise.allSettled(listToClose);
 }
