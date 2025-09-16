@@ -120,13 +120,13 @@ class Halo:
         # STT安定化用カウンタ
         self._stt_fail_count: int = 0
 
-    def is_vad(self, config: dict) -> bool:
+    def is_vad(self, config: dict, min_consecutive_speech_frames: int) -> bool:
         print("VAD detection start")
         is_vad = VAD.listen_until_voice_webrtc(
             aggressiveness=config["vad"]["aggressiveness"],
             samplerate=config["vad"]["samplereate"],
             frame_duration_ms=config["vad"]["frame_duration_ms"],
-            min_consecutive_speech_frames=config["vad"]["min_consecutive_speech_frames"],
+            min_consecutive_speech_frames=min_consecutive_speech_frames,
             device=None,
             timeout_seconds=None,
             corr_gate=self.corr_gate,
@@ -142,7 +142,7 @@ class Halo:
         time.sleep(1)
         self.speak_async("ハロ、待機モード")
         while True:
-            if not self.is_vad(self.config):
+            if not self.is_vad(self.config, 12):
                 time.sleep(0.1)
                 continue
             first_text = self.stt.listen_once()
@@ -166,7 +166,7 @@ class Halo:
                         print(f"タイムアウト({self.run_timeout_sec}s)により終了します。")
                         break
                     # VADで発話を検出
-                    if not self.is_vad(self.config):
+                    if not self.is_vad(self.config, self.config["vad"]["min_consecutive_speech_frames"]):
                         time.sleep(0.1)
                         continue
 

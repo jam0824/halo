@@ -10,15 +10,6 @@ const brave = new MCPServerStdio({
   env: { BRAVE_API_KEY: process.env.BRAVE_API_KEY },
 });
 
-// Playwright（ブラウザ操作）— ngrok の公開URLへ HTTP/SSE で接続
-const playwright = new MCPServerStreamableHttp({
-  name: "playwright",
-  // ★ あなたの ngrok の https URL に置き換え（※Playwrightは /mcp がエンドポイント）
-  url: process.env.PLAYWRIGHT_MCP_URL || "https://prevalid-unacrimoniously-leigh.ngrok-free.app/mcp",
-  // 認証をかけている場合はヘッダも渡せます:
-  // requestInit: { headers: { Authorization: "Bearer xxx" } },
-});
-
 // Spotify（オプション）— uv が未インストールでもスキップ可能に
 const spotify = new MCPServerStdio({
   name: "spotify",
@@ -48,7 +39,6 @@ async function connectSafe(server, name) {
 const listServers = [];
 listServers.push(await connectSafe(switchbot, "switchbot"));
 listServers.push(await connectSafe(brave, "brave"));
-listServers.push(await connectSafe(playwright, "playwright"));
 listServers.push(await connectSafe(spotify, "spotify"));
 const activeServers = listServers.filter(Boolean);
 
@@ -59,7 +49,6 @@ try {
     instructions: `
 あなたはMCPツールを使ってユーザーの依頼を解決します。
 - Web/ニュース/画像の検索: 「brave」
-- 実ブラウザ操作: 「playwright」
 - 音楽の検索/再生/キュー/プレイリスト操作: 「spotify」
 - 電気の操作: 「switchbot」
 - 出典URLや実行手順を簡潔に示し、日本語で答える。
@@ -79,7 +68,6 @@ try {
 } finally {
   const listToClose = [];
   if (activeServers.includes(brave)) listToClose.push(brave.close());
-  if (activeServers.includes(playwright)) listToClose.push(playwright.close());
   if (activeServers.includes(spotify)) listToClose.push(spotify.close());
   if (activeServers.includes(switchbot)) listToClose.push(switchbot.close());
   await Promise.allSettled(listToClose);
