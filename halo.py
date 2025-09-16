@@ -137,10 +137,10 @@ class Halo:
         return is_vad
 
     def main_loop(self) -> None:
-        self.speak_async("ハロ、起動した")
+        self.speak_async("起動したのだ")
         self.run()
         time.sleep(1)
-        self.speak_async("ハロ、待機モード")
+        self.speak_async("待機モードに入るのだ")
         while True:
             if not self.is_vad(self.config, 12):
                 time.sleep(0.1)
@@ -150,10 +150,10 @@ class Halo:
                 print("ウェイクアップキーワードが含まれていません")
                 time.sleep(0.1)
                 continue
-            self.speak_async("ハロ、おしゃべりする！")
+            self.speak_async("おしゃべりするのだ")
             self.run()
             time.sleep(1)
-            self.speak_async("ハロ、待機モード")
+            self.speak_async("待機モードに入るのだ")
 
     def run(self) -> None:
         print("========== 話しかけてください。Ctrl+Cで終了します。 ==========")
