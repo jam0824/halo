@@ -15,6 +15,7 @@ from helper.corr_gate import CorrelationGate
 from helper.asr_coherence import ASRCoherenceFilter
 from helper.vad import VAD
 from helper.similarity import TextSimilarity
+from halo_mcp.spotify_refresh import SpotifyRefresh
 
 if TYPE_CHECKING:
     from function_led import LEDBlinker
@@ -99,6 +100,7 @@ class Halo:
             pitchScale=self.tts_config["pitchScale"],
             intonationScale=self.tts_config["intonationScale"],
         )
+        self.spotify_refresh = SpotifyRefresh().refresh()
 
         # プリウォーム
         try:
