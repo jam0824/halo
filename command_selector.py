@@ -5,7 +5,6 @@ from concurrent.futures import Future
 import re
 from pathlib import Path
 from typing import Dict, List, Optional, Pattern, Tuple
-from playwright.controller_browser import BrowserController
 
 from halo_mcp.mcp_call import MCPClient
 
@@ -69,22 +68,8 @@ class CommandSelector:
         """
         self._ensure_loop()
 
-        if isinstance(command, dict):
-            # 代表テキストを推測（なければJSON文字列）
-            text = (
-                command.get("mcp_query")
-                or command.get("query")
-                or command.get("text")
-                or command.get("content")
-                or command.get("command")
-            )
-            if not text:
-                text = json.dumps(command, ensure_ascii=False)
-        else:
-            text = str(command)
-
         async def _task():
-            out = await self.mcp_client.call(text)
+            out = await self.mcp_client.call(command)
             return {"result": out}
 
         # ループスレッド上で実行し、concurrent.futures.Future を返す

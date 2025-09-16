@@ -15,6 +15,7 @@ from helper.corr_gate import CorrelationGate
 from helper.asr_coherence import ASRCoherenceFilter
 from helper.vad import VAD
 from helper.similarity import TextSimilarity
+from halo_mcp.spotify_refresh import SpotifyRefresh
 
 if TYPE_CHECKING:
     from function_led import LEDBlinker
@@ -27,6 +28,7 @@ class Halo:
 
         self.owner_name: str = self.config["owner_name"]
         self.your_name: str = self.config["your_name"]
+        self.run_timeout_sec: int = self.config["run_timeout_sec"]
         self.stt_type: str = self.config["stt"]
         self.llm_model: str = self.config["llm"]
         self.tts_config: dict = self.config["voiceVoxTTS"]
@@ -98,6 +100,7 @@ class Halo:
             pitchScale=self.tts_config["pitchScale"],
             intonationScale=self.tts_config["intonationScale"],
         )
+        self.spotify_refresh = SpotifyRefresh().refresh()
 
         # プリウォーム
         try:
@@ -133,12 +136,35 @@ class Halo:
             print("VAD detected")
         return is_vad
 
+    def main_loop(self) -> None:
+        self.speak_async("ハロ、起動した")
+        self.run()
+        time.sleep(1)
+        self.speak_async("ハロ、待機モード")
+        while True:
+            if not self.is_vad(self.config):
+                time.sleep(0.1)
+                continue
+            first_text = self.stt.listen_once()
+            if not self.wakeup_word_pattern.match(first_text):
+                print("ウェイクアップキーワードが含まれていません")
+                time.sleep(0.1)
+                continue
+            self.speak_async("ハロ、おしゃべりする！")
+            self.run()
+            time.sleep(1)
+            self.speak_async("ハロ、待機モード")
+
     def run(self) -> None:
         print("========== 話しかけてください。Ctrl+Cで終了します。 ==========")
+        time_out = time.time() + self.run_timeout_sec
 
         try:
             while True:
                 try:
+                    if time.time() >= time_out:
+                        print(f"タイムアウト({self.run_timeout_sec}s)により終了します。")
+                        break
                     # VADで発話を検出
                     if not self.is_vad(self.config):
                         time.sleep(0.1)
@@ -169,6 +195,8 @@ class Halo:
 
                     # 応答読み上げは非同期で行う
                     self.speak_async(self.response)
+                    time_out = time.time() + self.run_timeout_sec    # タイムアウト時間を更新
+
                 except KeyboardInterrupt:
                     print("\n\n音声認識ループが中断されました")
                     break
@@ -242,6 +270,7 @@ class Halo:
             fut.add_done_callback(_on_done)
 
     # ---------- 会話ロジック ----------
+
     def check_farewell(self, txt: str) -> bool:
         if self.farewell_word_pattern.match(txt):
             farewell = "バイバイ！"
@@ -327,4 +356,4 @@ class Halo:
 
 if __name__ == "__main__":
     halo = Halo()
-    halo.run()
+    halo.main_loop()
