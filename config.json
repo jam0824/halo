@@ -8,7 +8,7 @@
   "farewell_word": ".*(バイバイ|さようなら|終了).*",
   "run_timeout_sec": 120,
   "voiceVoxTTS": {
-    "base_url": "http://192.168.1.151:50021",
+    "base_url": "http://57.180.156.193",
     "speaker": 89,
     "max_len": 80,
     "queue_size": 4,
@@ -35,6 +35,7 @@
   "vad":{
     "samplereate": 16000,
     "frame_duration_ms": 20,
+    "waiting_min_consecutive_speech_frames": 12,
     "min_consecutive_speech_frames": 4,
     "corr_threshold": 0.50,
     "max_lag_ms": 95,
