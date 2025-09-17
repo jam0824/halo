@@ -1,0 +1,14 @@
+[Unit]
+Description=Run halo.sh after network is up
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi
+ExecStart=/home/pi/halo.sh
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
