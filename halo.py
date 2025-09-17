@@ -59,15 +59,15 @@ class Halo:
         self.system_content = self.halo_helper.load_system_prompt_and_replace(self.owner_name, self.your_name)
         print(self.system_content)
 
-        # 相関ゲート（TTS由来の音を抑制）をアプリ全体で共有
-        cfg = self.config.get("vad", {})
-        self.corr_gate = CorrelationGate(
-            sample_rate=cfg.get("samplereate", 16000),
-            frame_ms=cfg.get("frame_duration_ms", 20),
-            buffer_sec=1.0,
-            corr_threshold=cfg.get("corr_threshold", 0.60),
-            max_lag_ms=cfg.get("max_lag_ms", 95),
-        )
+        # 常時STT運用用の状態
+        self.history: str = ""
+        self.response: str = ""
+        self.command: dict = {}
+        # TTSをバックグラウンドで回すためのスレッド管理
+        self.tts_thread: Optional[threading.Thread] = None
+        self.tts_lock = threading.Lock()
+        # STT安定化用カウンタ
+        self._stt_fail_count: int = 0
 
         self.led: Optional["LEDBlinker"] = None
         if self.use_led:
@@ -88,61 +88,71 @@ class Halo:
                 print(f"モーター機能を無効化します: {e}")
                 self.use_motor = False
                 self.motor = None
+        
+        self.corr_gate = self.init_corr_gate(self.config.get("vad", {}))
+        self.tts = self.init_tts(self.tts_config)
+        self.init_spotify()
+        # ウォームアップ
+        self.pre_warm_up(self.stt, self.llm, self.llm_model, self.system_content)
+        
 
-        self.tts = VoiceVoxTTS(
-            base_url=self.tts_config["base_url"],
-            speaker=self.tts_config["speaker"],
-            max_len=self.tts_config["max_len"],
-            queue_size=self.tts_config["queue_size"],
+    # ---------- init ----------
+    def init_corr_gate(self, cfg: dict) -> CorrelationGate:
+        # 相関ゲート（TTS由来の音を抑制）をアプリ全体で共有
+        corr_gate = CorrelationGate(
+            sample_rate=cfg.get("samplereate", 16000),
+            frame_ms=cfg.get("frame_duration_ms", 20),
+            buffer_sec=1.0,
+            corr_threshold=cfg.get("corr_threshold", 0.60),
+            max_lag_ms=cfg.get("max_lag_ms", 95),
         )
-        self.tts.set_params(
-            speedScale=self.tts_config["speedScale"],
-            pitchScale=self.tts_config["pitchScale"],
-            intonationScale=self.tts_config["intonationScale"],
-        )
-        self.spotify_refresh = SpotifyRefresh().refresh()
+        return corr_gate
 
+    def init_tts(self, tts_config: dict) -> VoiceVoxTTS:
+        tts = VoiceVoxTTS(
+            base_url=tts_config["base_url"],
+            speaker=tts_config["speaker"],
+            max_len=tts_config["max_len"],
+            queue_size=tts_config["queue_size"],
+        )
+        tts.set_params(
+            speedScale=tts_config["speedScale"],
+            pitchScale=tts_config["pitchScale"],
+            intonationScale=tts_config["intonationScale"],
+        )
+        return tts
+
+
+    def init_spotify(self):
+        try:
+            spotify_refresh = SpotifyRefresh().refresh()
+        except Exception as e:
+            print(f"Spotify refresh でエラー: {e}")
+        return
+
+    def pre_warm_up(self, stt, llm, llm_model, system_content):
         # プリウォーム
         try:
-            self.stt.warm_up()
-            response_text = self.llm.generate_text(self.llm_model, "日本語で会話", self.system_content, "")
+            stt.warm_up()
+            response_text = llm.generate_text(llm_model, "日本語で会話", system_content, "")
             print(response_text)
         except Exception as e:
             print(f"STT warm_up でエラー: {e}")
 
-        # 常時STT運用用の状態
-        self.history: str = ""
-        self.response: str = ""
-        self.command: dict = {}
-        # TTSをバックグラウンドで回すためのスレッド管理
-        self.tts_thread: Optional[threading.Thread] = None
-        self.tts_lock = threading.Lock()
-        # STT安定化用カウンタ
-        self._stt_fail_count: int = 0
 
-    def is_vad(self, config: dict) -> bool:
-        print("VAD detection start")
-        is_vad = VAD.listen_until_voice_webrtc(
-            aggressiveness=config["vad"]["aggressiveness"],
-            samplerate=config["vad"]["samplereate"],
-            frame_duration_ms=config["vad"]["frame_duration_ms"],
-            min_consecutive_speech_frames=config["vad"]["min_consecutive_speech_frames"],
-            device=None,
-            timeout_seconds=None,
-            corr_gate=self.corr_gate,
-            stop_event=None,
-        )
-        if is_vad:
-            print("VAD detected")
-        return is_vad
 
+    
+
+    # ---------- main loop ----------
     def main_loop(self) -> None:
         self.speak_async("ハロ、起動した")
         self.run()
         time.sleep(1)
         self.speak_async("ハロ、待機モード")
         while True:
-            if not self.is_vad(self.config):
+            if not self.is_vad(
+                self.config, 
+                self.config["vad"]["waiting_min_consecutive_speech_frames"]):
                 time.sleep(0.1)
                 continue
             first_text = self.stt.listen_once()
@@ -166,7 +176,9 @@ class Halo:
                         print(f"タイムアウト({self.run_timeout_sec}s)により終了します。")
                         break
                     # VADで発話を検出
-                    if not self.is_vad(self.config):
+                    if not self.is_vad(
+                        self.config, 
+                        self.config["vad"]["min_consecutive_speech_frames"]):
                         time.sleep(0.1)
                         continue
 
@@ -270,6 +282,21 @@ class Halo:
             fut.add_done_callback(_on_done)
 
     # ---------- 会話ロジック ----------
+    def is_vad(self, config: dict, min_consecutive_speech_frames: int) -> bool:
+        print("VAD detection start")
+        is_vad = VAD.listen_until_voice_webrtc(
+            aggressiveness=config["vad"]["aggressiveness"],
+            samplerate=config["vad"]["samplereate"],
+            frame_duration_ms=config["vad"]["frame_duration_ms"],
+            min_consecutive_speech_frames=min_consecutive_speech_frames,
+            device=None,
+            timeout_seconds=None,
+            corr_gate=self.corr_gate,
+            stop_event=None,
+        )
+        if is_vad:
+            print("VAD detected")
+        return is_vad
 
     def check_farewell(self, txt: str) -> bool:
         if self.farewell_word_pattern.match(txt):

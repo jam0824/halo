@@ -18,6 +18,8 @@ class HardwareServo:
         # Pi 5 のチャネル割当:
         #  ch 0→GPIO12, ch 1→GPIO13, ch 2→GPIO18, ch 3→GPIO19  (rpi-hardware-pwmの説明に準拠)
         self._pwm = HardwarePWM(pwm_channel=int(pwm_channel), hz=self._hz, chip=int(chip))
+        #  [Errno 13] Permission denied: '/sys/class/pwm/pwmchip0/pwm3/period' 対策
+        sleep(0.1)
         self._running = False
 
     def start(self, pulse_s:float):
