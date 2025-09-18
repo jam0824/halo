@@ -16,6 +16,7 @@ from helper.asr_coherence import ASRCoherenceFilter
 from helper.vad import VAD
 from helper.similarity import TextSimilarity
 from halo_mcp.spotify_refresh import SpotifyRefresh
+from fake_memory.make_fake_memory import FakeMemory
 
 if TYPE_CHECKING:
     from function_led import LEDBlinker
@@ -56,6 +57,7 @@ class Halo:
         self.asr_coherence_filter = ASRCoherenceFilter()
         self.similarity = TextSimilarity()
         self.filler = Filler(self.isfiller, self.filler_dir)
+        self.fake_memory = FakeMemory()
         self.system_content = self.halo_helper.load_system_prompt_and_replace(self.owner_name, self.your_name)
         print(self.system_content)
 
@@ -68,6 +70,8 @@ class Halo:
         self.tts_lock = threading.Lock()
         # STT安定化用カウンタ
         self._stt_fail_count: int = 0
+        # fake_memory用
+        self.fake_memory_text = ""
 
         self.led: Optional["LEDBlinker"] = None
         if self.use_led:
@@ -92,6 +96,7 @@ class Halo:
         self.corr_gate = self.init_corr_gate(self.config.get("vad", {}))
         self.tts = self.init_tts(self.tts_config)
         self.init_spotify()
+        self.init_fake_memory()
         # ウォームアップ
         self.pre_warm_up(self.stt, self.llm, self.llm_model, self.system_content)
         
@@ -128,6 +133,10 @@ class Halo:
             spotify_refresh = SpotifyRefresh().refresh()
         except Exception as e:
             print(f"Spotify refresh でエラー: {e}")
+        return
+
+    def init_fake_memory(self):
+        self.fake_memory.make_fake_memory()
         return
 
     def pre_warm_up(self, stt, llm, llm_model, system_content):
@@ -172,6 +181,8 @@ class Halo:
         try:
             while True:
                 try:
+                    # fake_memoryを取得
+                    self.fake_memory_text = self.get_fake_memory_text(self.fake_memory_text)
                     if time.time() >= time_out:
                         print(f"タイムアウト({self.run_timeout_sec}s)により終了します。")
                         break
@@ -198,7 +209,8 @@ class Halo:
                     self.say_filler()
 
                     print("LLMで応答を生成中...")
-                    response_text = self.llm.generate_text(self.llm_model, user_text, self.system_content, self.history)
+                    system_memory = self.system_content + self.fake_memory_text
+                    response_text = self.llm.generate_text(self.llm_model, user_text, system_memory, self.history)
                     self.response, self.command = self.halo_helper.get_halo_response(response_text)
                     self.history = self.halo_helper.append_history(self.history, self.your_name, self.response)
                     # コマンドがあれば実行
@@ -280,6 +292,15 @@ class Halo:
                 except Exception as e:
                     print(f"[command_error] {e}")
             fut.add_done_callback(_on_done)
+
+    # ---------- fake_memory ----------
+    def get_fake_memory_text(self, memory_text: str):
+        if memory_text != "":
+            return memory_text
+        if not self.fake_memory.check_todays_memory():
+            return memory_text
+        memory_text = self.fake_memory.get_fake_memory_text()
+        return memory_text
 
     # ---------- 会話ロジック ----------
     def is_vad(self, config: dict, min_consecutive_speech_frames: int) -> bool:
