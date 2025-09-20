@@ -34,6 +34,8 @@ class MixiClient:
         self.context.storage_state(path=self.storage_path)
 
     def post(self, text: str):
+        self.page.wait_for_timeout(60_000)
+        self.context.storage_state(path=self.storage_path)
         self.page.get_by_text("ポスト", exact=False).first.click()
         self.page.locator('[data-placeholder="今なにしてる？"]').fill(text)
         self.page.locator('[aria-label="送信"]').click()

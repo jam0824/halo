@@ -238,12 +238,15 @@ class Halo:
                     self.say_filler()
 
                     # コマンド直接実行の場合
-                    response = self.command_selector.select(user_text, self.fake_summary_text)
-                    if response:
-                        self.response = response
-                        self.history = self.halo_helper.append_history(self.history, self.your_name, self.response)
-                        self.speak_async(self.response)
-                        continue
+                    try:
+                        response = self.command_selector.select(user_text, self.fake_summary_text)
+                        if response:
+                            self.response = response
+                            self.history = self.halo_helper.append_history(self.history, self.your_name, self.response)
+                            self.speak_async(self.response)
+                            continue
+                    except Exception as e:
+                        print(f"コマンド実行エラー: {e}")
 
                     print("LLMで応答を生成中...")
                     system_memory = self.system_content + self.fake_memory_text

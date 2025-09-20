@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Pattern, Tuple
 
 from halo_mcp.mcp_call import MCPClient
-from playwright.playwright_mixi2 import MixiClient
+from halo_playwright.playwright_mixi2 import MixiClient
 
 class CommandSelector:
     """
