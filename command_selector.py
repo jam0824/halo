@@ -17,7 +17,7 @@ class CommandSelector:
     """
 
     def __init__(self, config_path: str = "command.json") -> None:
-        self.mixi_client = MixiClient()
+        self.mixi_client = MixiClient(headless=True)
         self.config_path: str = config_path
         self.listRules: List[Tuple[str, Pattern[str]]] = []
         self._load_config()
