@@ -1,4 +1,5 @@
 import json
+import os
 
 class HaloHelper:
     # 設定ファイルの読み込み
@@ -84,3 +85,32 @@ class HaloHelper:
             return responses[0], ""
         # 1行目がメッセージ、2行目がコマンド
         return responses[0], responses[1]
+
+    # テキストファイルを読み込み、1行ごとのリストにして返す
+    def read_file_lines(self, file_path: str) -> list[str]:
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                listLines = f.read().splitlines()
+            return listLines
+        except Exception:
+            return []
+    def read_file_text(self, file_path: str) -> str:
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                return f.read()
+        except Exception:
+            return ""
+
+    # 与えられたテキストを指定パスに保存する
+    def save_text_to_file(self, file_path: str, text: str) -> bool:
+        try:
+            parent = os.path.dirname(file_path)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(text)
+            return True
+        except Exception:
+            return False
+
+    

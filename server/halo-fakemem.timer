@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Halo Fake Memory every day at 01:00
+
+[Timer]
+OnCalendar=*-*-* 01:00:00
+Persistent=true
+Unit=halo-fakemem.service
+
+[Install]
+WantedBy=timers.target

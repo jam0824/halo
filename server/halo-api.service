@@ -1,0 +1,23 @@
+# /etc/systemd/system/halo-api.service
+[Unit]
+Description=Halo FastAPI (Uvicorn)
+After=network.target
+
+[Service]
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/home/ec2-user/halo/server
+
+# ★ venv の実パスに合わせる（/home/ec2-user/halo/halo/bin/python）
+ExecStart=/home/ec2-user/halo/halo/bin/python -m uvicorn server:app \
+  --app-dir /home/ec2-user/halo/server \
+  --host 127.0.0.1 \
+  --port 50022
+
+Restart=always
+RestartSec=3
+# 必要なら:
+# EnvironmentFile=/etc/halo.env
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,13 @@
+[Unit]
+Description=Halo Fake Memory Job
+After=network.target
+
+[Service]
+Type=oneshot
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/home/ec2-user/halo/fake_memory
+EnvironmentFile=/etc/halo.env
+
+# ★ 仮想環境の python を直接指定（halo/halo/bin/python）
+ExecStart=/home/ec2-user/halo/halo/bin/python /home/ec2-user/halo/fake_memory/make_fake_memory.py
