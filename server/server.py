@@ -28,6 +28,15 @@ async def read_diary_content(date_str: str) -> str:
     return await asyncio.to_thread(file_path.read_text, encoding="utf-8")
 
 
+# ヘルパー: 指定日のサマリーファイルを読み込む（ファイルオープン処理を分離）
+async def read_summary_content(date_str: str) -> str:
+    base_dir = Path(__file__).resolve().parent.parent
+    file_path = base_dir / "fake_memory/diary" / f"{date_str}_summary.txt"
+    if not file_path.exists():
+        raise FileNotFoundError(f"Summary file not found: {file_path}")
+    return await asyncio.to_thread(file_path.read_text, encoding="utf-8")
+
+
 # 直近n日分のダイアリーを結合して返す（静的ルートを先に定義して、動的ルートより優先）
 @app.get("/diary/recent")
 async def get_recent_diary(days: int = 1) -> JSONResponse:
@@ -53,6 +62,19 @@ async def get_recent_diary(days: int = 1) -> JSONResponse:
             content={"dates": listDates, "content": "\n".join(listContents)},
             media_type="application/json; charset=utf-8",
         )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# エンドポイント: 指定日のサマリー（例: 20250920_summary.txt）を返す
+@app.get("/diary/summary/{date_int}")
+async def get_summary(date_int: int) -> JSONResponse:
+    try:
+        date_str = f"{date_int:08d}"
+        content = await read_summary_content(date_str)
+        return JSONResponse(content={"date": date_str, "content": content}, media_type="application/json; charset=utf-8")
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -1,0 +1,21 @@
+{
+    "data_file": "game.md",
+    "detailed": {
+        "model": "gpt-5-mini",
+        "prompt": "ゲーム{selected_memory}について、概要および攻略、各名シーンを詳しく書いてください。",
+        "system_content": "あなたはプロのゲーム実況者です。",
+        "assistant_content": ""
+    },
+    "diary": {
+        "model": "gpt-4o-mini",
+        "prompt": "以下のゲームを実際にプレイしたとして、楽しかった体験を詳細に記述してください。実際の体験として書いてください。",
+        "system_content": "プロの脚本家の様に、あたかも実際にゲームをプレイしたかのように記述するのが得意です。必ず「これは{today_month_day}の楽しい一日の思い出です。」からはじめてください。",
+        "assistant_content": ""
+    },
+    "summary": {
+        "model": "gpt-5-mini",
+        "prompt": "SNSに楽しかった思い出を投稿します。149文字以内で、以下の思い出をまとめてください。",
+        "system_content": "あなたの名前はハロです。ハロは片言で返します。ハロは自分の名前(ハロ)を呼びがちです。(例)ハロ、ハンバーグが気に入った！",
+        "assistant_content": ""
+    }
+}

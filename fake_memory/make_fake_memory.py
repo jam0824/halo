@@ -14,7 +14,8 @@ class FakeMemory:
         print(self.base_dir)
 
     def make_fake_memory(self) -> None:
-        diary_text = self.make_travel_memory()
+        selected_memory = self.select_memory("memory_json_list.md")
+        diary_text = self.make_memory(selected_memory)
         return diary_text
 
     def select_memory(self, data_file: str):
@@ -27,8 +28,8 @@ class FakeMemory:
         text = text.replace("{today_month_day}", today_month_day)
         return text
 
-    def make_travel_memory(self):
-        file_path = self.base_dir / "travel_memory.json"
+    def make_memory(self, json_file: str):
+        file_path = self.base_dir / json_file
         data = self.server_helper.read_file_text(str(file_path))
         # ファイル名が欲しいだけでjson化。後にリプレイスする。良いやり方があれば変えたい
         tmp_dict_data = json.loads(data)
@@ -39,6 +40,8 @@ class FakeMemory:
         dict_data = json.loads(data)
         diary_text = self.make_generic_memory.make_generic_memory(dict_data, str(self.base_dir))
         return diary_text
+
+    
 
 
 if __name__ == "__main__":
