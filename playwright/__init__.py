@@ -1,3 +1,0 @@
-"""Project-local playwright package."""
-
-
