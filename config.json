@@ -44,7 +44,8 @@
   },
   "fake_memory":{
     "use_fake_memory": true,
-    "fake_memory_endpoint": "http://57.180.156.193/diary/"
+    "fake_memory_endpoint": "http://57.180.156.193/diary/",
+    "get_fake_memory_days": 3
   },
   "interrupt_word": ".*(待って|待|そうだ|えっと|いいね|そうそう|止めて|とめて|終了).*",
   "similarity_threshold": 0.70,

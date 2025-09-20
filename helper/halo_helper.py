@@ -90,6 +90,11 @@ class HaloHelper:
     def get_today(self):
         return datetime.now().strftime("%Y%m%d")
 
+    def get_today_month_day(self) -> str:
+        """今日の日付を『～月～日』形式で返す。例: '9月20日'"""
+        now = datetime.now()
+        return f"{now.month}月{now.day}日"
+
     
     # ---------- テキストファイル ----------
     # テキストファイルを読み込み、1行ごとのリストにして返す
