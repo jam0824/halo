@@ -1,5 +1,6 @@
 import json
 import os
+from datetime import datetime
 
 class HaloHelper:
     # 設定ファイルの読み込み
@@ -86,6 +87,11 @@ class HaloHelper:
         # 1行目がメッセージ、2行目がコマンド
         return responses[0], responses[1]
 
+    def get_today(self):
+        return datetime.now().strftime("%Y%m%d")
+
+    
+    # ---------- テキストファイル ----------
     # テキストファイルを読み込み、1行ごとのリストにして返す
     def read_file_lines(self, file_path: str) -> list[str]:
         try:
