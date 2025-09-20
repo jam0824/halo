@@ -19,16 +19,32 @@ class HardwareServo:
         #  ch 0→GPIO12, ch 1→GPIO13, ch 2→GPIO18, ch 3→GPIO19  (rpi-hardware-pwmの説明に準拠)
         self._pwm = HardwarePWM(pwm_channel=int(pwm_channel), hz=self._hz, chip=int(chip))
         #  [Errno 13] Permission denied: '/sys/class/pwm/pwmchip0/pwm3/period' 対策
-        sleep(0.1)
+        sleep(0.5)
         self._running = False
 
     def start(self, pulse_s:float):
         duty = max(0.0, min(100.0, (pulse_s / self.frame_width_s) * 100.0))
         if not self._running:
-            self._pwm.start(duty)
+            # 初回のみ Errno 13 リトライを入れる
+            try:
+                self._pwm.start(duty)
+            except OSError as e:
+                if getattr(e, "errno", None) == errno.EACCES:  # 13
+                    sleep(0.1)
+                    self._pwm.start(duty)  # 1回だけ再試行
+                else:
+                    raise
             self._running = True
         else:
-            self._pwm.change_duty_cycle(duty)
+            # 既に動作中なら duty 変更。これも念のため軽くリトライ
+            try:
+                self._pwm.change_duty_cycle(duty)
+            except OSError as e:
+                if getattr(e, "errno", None) == errno.EACCES:
+                    sleep(0.05)
+                    self._pwm.change_duty_cycle(duty)
+                else:
+                    raise
 
     def set_pulse(self, pulse_s:float):
         self.start(pulse_s)

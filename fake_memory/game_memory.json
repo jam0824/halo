@@ -2,7 +2,7 @@
     "data_file": "game.md",
     "detailed": {
         "model": "gpt-5-mini",
-        "prompt": "ゲーム{selected_memory}について、概要および攻略、各名シーンを詳しく書いてください。",
+        "prompt": "ゲーム{selected_memory}について、概要および攻略、各名シーンを詳しく書いてください。ネタバレOKです。",
         "system_content": "あなたはプロのゲーム実況者です。",
         "assistant_content": ""
     },
