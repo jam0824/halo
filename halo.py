@@ -72,7 +72,8 @@ class Halo:
         # STT安定化用カウンタ
         self._stt_fail_count: int = 0
         # fake_memory用
-        self.fake_memory_text = ""
+        self.fake_memory_text = self.get_fake_diary_text(self.config)
+        self.fake_summary_text = self.get_fake_summary_text(self.config)
 
         self.led: Optional["LEDBlinker"] = None
         if self.use_led:
@@ -97,10 +98,8 @@ class Halo:
         self.corr_gate = self.init_corr_gate(self.config.get("vad", {}))
         self.tts = self.init_tts(self.tts_config)
         self.init_spotify()
-        self.fake_memory_text = self.get_fake_memory_text(
-            self.config["fake_memory"]["use_fake_memory"], 
-            self.config["fake_memory"]["fake_memory_endpoint"],
-            self.config["fake_memory"]["get_fake_memory_days"])
+
+        
         # ウォームアップ
         self.pre_warm_up(self.stt, self.llm, self.llm_model, self.system_content)
         
@@ -139,14 +138,23 @@ class Halo:
             print(f"Spotify refresh でエラー: {e}")
         return
 
-    def get_fake_memory_text(self, use_fake_memory: bool, fake_memory_endpoint: str, get_fake_memory_days: int) -> str:
+    def get_fake_diary_text(self, config: dict) -> str:
+        if not config["fake_memory"]["use_fake_memory"]:
+            return ""
+        url = f"{config['fake_memory']['fake_memory_endpoint']}recent?days={config['fake_memory']['get_fake_memory_days']}"
+        return self._get_fake_memory_text(config["fake_memory"]["use_fake_memory"], url)
+
+    def get_fake_summary_text(self, config: dict) -> str:
+        if not config["fake_memory"]["use_fake_memory"]:
+            return ""
+        url = f"{config['fake_memory']['fake_memory_endpoint']}summary/{self.halo_helper.get_today()}"
+        return self._get_fake_memory_text(config["fake_memory"]["use_fake_memory"], url)
+
+    def _get_fake_memory_text(self, use_fake_memory: bool, fake_memory_endpoint: str) -> str:
         if not use_fake_memory:
             return ""
         today = self.halo_helper.get_today_month_day()
-        base_endpoint = fake_memory_endpoint.rstrip("/")
-        if not base_endpoint:
-            return ""
-        url = f"{base_endpoint}/recent?days={get_fake_memory_days}"
+        url = fake_memory_endpoint
         print(url)
         try:
             req = urllib.request.Request(url, headers={"Accept": "application/json"})
@@ -229,6 +237,14 @@ class Halo:
                     # フィラー再生
                     self.say_filler()
 
+                    # コマンド直接実行の場合
+                    response = self.command_selector.select(user_text, self.fake_summary_text)
+                    if response:
+                        self.response = response
+                        self.history = self.halo_helper.append_history(self.history, self.your_name, self.response)
+                        self.speak_async(self.response)
+                        continue
+
                     print("LLMで応答を生成中...")
                     system_memory = self.system_content + self.fake_memory_text
                     response_text = self.llm.generate_text(self.llm_model, user_text, system_memory, self.history)
@@ -300,6 +316,8 @@ class Halo:
     def exec_command(self, command: str) -> str:
         if self.command == "":
             return
+        command = command.replace("{summary}", self.fake_summary_text)
+        print(command)
         fut = self.command_selector.exec_command(command)
         if fut:
             def _on_done(f):
@@ -313,6 +331,7 @@ class Halo:
                 except Exception as e:
                     print(f"[command_error] {e}")
             fut.add_done_callback(_on_done)
+
 
     # ---------- 会話ロジック ----------
     def is_vad(self, config: dict, min_consecutive_speech_frames: int) -> bool:

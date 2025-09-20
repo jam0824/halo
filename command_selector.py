@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Pattern, Tuple
 
 from halo_mcp.mcp_call import MCPClient
+from playwright.playwright_mixi2 import MixiClient
 
 class CommandSelector:
     """
@@ -16,6 +17,7 @@ class CommandSelector:
     """
 
     def __init__(self, config_path: str = "command.json") -> None:
+        self.mixi_client = MixiClient()
         self.config_path: str = config_path
         self.listRules: List[Tuple[str, Pattern[str]]] = []
         self._load_config()
@@ -51,14 +53,16 @@ class CommandSelector:
                 return key
         return None
 
-    def select(self, text: str) -> Optional[str]:
-        key = self.match_key(text)
+    def select(self, user_text: str, command: str) -> Optional[str]:
+        response = None
+        key = self.match_key(user_text)
         if key is None:
             print("[selector] マッチするコマンドがありませんでした")
             return None
-        # 現状はテキスト全体を MCP に渡す
-        self.exec_command(text)
-        return key
+        elif key == "sns":
+            self.mixi_client.run_once(command)
+            response = "ハロ、投稿した。" + command
+        return response
     
     def exec_command(self, command) -> Future:
         """コマンドを非同期ループに投げて concurrent.futures.Future を返す。
