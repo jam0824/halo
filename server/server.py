@@ -3,6 +3,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from pathlib import Path
 from fastapi.responses import JSONResponse
+from datetime import datetime, timedelta
 
 
 app = FastAPI(title="Halo Server")
@@ -27,17 +28,46 @@ async def read_diary_content(date_str: str) -> str:
     return await asyncio.to_thread(file_path.read_text, encoding="utf-8")
 
 
-# エンドポイント: 文字列パラメータ（例: "20250920"）で指定し、内容を返す
-@app.get("/diary/{date_str}")
-async def get_diary(date_str: str) -> JSONResponse:
+# 直近n日分のダイアリーを結合して返す（静的ルートを先に定義して、動的ルートより優先）
+@app.get("/diary/recent")
+async def get_recent_diary(days: int = 1) -> JSONResponse:
     try:
+        if days <= 0:
+            days = 1
+        # 暴走防止の上限
+        if days > 30:
+            days = 30
+        listDates: list[str] = []
+        listContents: list[str] = []
+        today_dt = datetime.now()
+        for i in range(days):
+            date_str = (today_dt - timedelta(days=i)).strftime("%Y%m%d")
+            try:
+                content = await read_diary_content(date_str)
+                listDates.append(date_str)
+                listContents.append(content)
+            except FileNotFoundError:
+                # 無い日はスキップ
+                continue
+        return JSONResponse(
+            content={"dates": listDates, "content": "\n".join(listContents)},
+            media_type="application/json; charset=utf-8",
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# エンドポイント: 整数日付（例: 20250920）で指定し、内容を返す
+@app.get("/diary/{date_int}")
+async def get_diary(date_int: int) -> JSONResponse:
+    try:
+        date_str = f"{date_int:08d}"
         content = await read_diary_content(date_str)
         return JSONResponse(content={"date": date_str, "content": content}, media_type="application/json; charset=utf-8")
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 if __name__ == "__main__":
     import uvicorn

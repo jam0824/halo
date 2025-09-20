@@ -16,6 +16,11 @@ sudo systemctl status halo-api --no-pager
 journalctl -u halo-api -n 100 --no-pager
 ```
 
+# server.py更新時
+```
+sudo systemctl restart halo-api
+```
+
 # make_fake_memory.pyの起動
 `/etc/halo.env` に記載
 

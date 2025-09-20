@@ -1,4 +1,7 @@
 import re
+import json
+import urllib.request
+import urllib.error
 import threading
 import time
 from typing import Optional, TYPE_CHECKING, Union
@@ -16,7 +19,6 @@ from helper.asr_coherence import ASRCoherenceFilter
 from helper.vad import VAD
 from helper.similarity import TextSimilarity
 from halo_mcp.spotify_refresh import SpotifyRefresh
-from fake_memory.make_fake_memory import FakeMemory
 
 if TYPE_CHECKING:
     from function_led import LEDBlinker
@@ -57,7 +59,6 @@ class Halo:
         self.asr_coherence_filter = ASRCoherenceFilter()
         self.similarity = TextSimilarity()
         self.filler = Filler(self.isfiller, self.filler_dir)
-        self.fake_memory = FakeMemory()
         self.system_content = self.halo_helper.load_system_prompt_and_replace(self.owner_name, self.your_name)
         print(self.system_content)
 
@@ -96,7 +97,10 @@ class Halo:
         self.corr_gate = self.init_corr_gate(self.config.get("vad", {}))
         self.tts = self.init_tts(self.tts_config)
         self.init_spotify()
-        self.init_fake_memory()
+        self.fake_memory_text = self.get_fake_memory_text(
+            self.config["fake_memory"]["use_fake_memory"], 
+            self.config["fake_memory"]["fake_memory_endpoint"],
+            self.config["fake_memory"]["get_fake_memory_days"])
         # ウォームアップ
         self.pre_warm_up(self.stt, self.llm, self.llm_model, self.system_content)
         
@@ -135,9 +139,28 @@ class Halo:
             print(f"Spotify refresh でエラー: {e}")
         return
 
-    def init_fake_memory(self):
-        self.fake_memory.make_fake_memory()
-        return
+    def get_fake_memory_text(self, use_fake_memory: bool, fake_memory_endpoint: str, get_fake_memory_days: int) -> str:
+        if not use_fake_memory:
+            return ""
+        today = self.halo_helper.get_today_month_day()
+        base_endpoint = fake_memory_endpoint.rstrip("/")
+        if not base_endpoint:
+            return ""
+        url = f"{base_endpoint}/recent?days={get_fake_memory_days}"
+        print(url)
+        try:
+            req = urllib.request.Request(url, headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                charset = resp.headers.get_content_charset() or "utf-8"
+                body_text = resp.read().decode(charset, errors="replace")
+                body_text = body_text.replace(today, f"今日")
+            data = json.loads(body_text)
+            fake_memory_text = data.get("content", "") or ""
+            print(fake_memory_text)
+            return fake_memory_text
+        except Exception as e:
+            print(f"fake_memory取得エラー: {e}")
+            return
 
     def pre_warm_up(self, stt, llm, llm_model, system_content):
         # プリウォーム
@@ -181,8 +204,6 @@ class Halo:
         try:
             while True:
                 try:
-                    # fake_memoryを取得
-                    self.fake_memory_text = self.get_fake_memory_text(self.fake_memory_text)
                     if time.time() >= time_out:
                         print(f"タイムアウト({self.run_timeout_sec}s)により終了します。")
                         break
@@ -292,15 +313,6 @@ class Halo:
                 except Exception as e:
                     print(f"[command_error] {e}")
             fut.add_done_callback(_on_done)
-
-    # ---------- fake_memory ----------
-    def get_fake_memory_text(self, memory_text: str):
-        if memory_text != "":
-            return memory_text
-        if not self.fake_memory.check_todays_memory():
-            return memory_text
-        memory_text = self.fake_memory.get_fake_memory_text()
-        return memory_text
 
     # ---------- 会話ロジック ----------
     def is_vad(self, config: dict, min_consecutive_speech_frames: int) -> bool:
