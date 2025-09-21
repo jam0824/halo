@@ -311,6 +311,7 @@ class Halo:
             def _run():
                 try:
                     self.move_pan_kyoro_kyoro(1, 2)
+                    self.filler.stop_filler()   # フィラー再生停止
                     self.tts.speak(text, self.led, self.use_led, self.motor, self.use_motor, corr_gate=self.corr_gate)
                 except Exception as e:
                     print(f"TTSエラー: {e}")
