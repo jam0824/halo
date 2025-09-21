@@ -15,4 +15,11 @@ class Filler:
         self.player.random_play(block=False)
         print("filler再生中")
         return True
+    
+    def stop_filler(self) -> bool:
+        if self.player is None or not self.isfiller:
+            return False
+        self.player.stop()
+        print("filler再生停止")
+        return True
             
