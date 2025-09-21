@@ -226,6 +226,8 @@ class Halo:
                     if not user_text or user_text == "":
                         time.sleep(0.1)
                         continue
+                    # ユーザー発話認識のテキスト変更(春→ハロなど)
+                    user_text = self.halo_helper.apply_text_changes(user_text, self.change_name)
                     self.history = self.halo_helper.append_history(self.history, self.owner_name, user_text)
 
                     # 終了ワードのチェック
