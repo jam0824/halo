@@ -68,7 +68,12 @@ class VoiceVoxTTS:
         """例: set_params(speedScale=1.1, pitchScale=-0.2)"""
         self.params.update(kwargs)
 
-    def speak(self, text: str, led: Optional["LEDBlinker"], isLed: bool, motor: Optional["Motor"], isMotor: bool, corr_gate=None):
+    def speak(self, 
+        text: str, 
+        led: Optional["LEDBlinker"], isLed: bool, 
+        motor: Optional["Motor"], isMotor: bool, 
+        corr_gate=None, 
+        filler=None):
         """
         同期実行：合成＆再生を行い、完了（または stop()）まで戻らない。
         """
@@ -78,6 +83,7 @@ class VoiceVoxTTS:
         self.isMotor = isMotor
         self._stop_event.clear()
         self._is_speaking = True
+        self.filler = filler
         start_time = time.perf_counter()
         chunks = self._split_into_chunks(text, self.max_len)
         q: "queue.Queue" = queue.Queue(maxsize=self.queue_size)
@@ -205,6 +211,8 @@ class VoiceVoxTTS:
     def _play(self, wav_bytes: bytes):
         with wave.open(BytesIO(wav_bytes), "rb") as wf:
             wav = sa.WaveObject.from_wave_read(wf)
+        if self.filler is not None:
+            self.filler.stop_filler()
         self._led_start_blink()
         self._motor_tilt()
         self._play_obj = wav.play()
