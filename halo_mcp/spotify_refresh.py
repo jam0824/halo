@@ -27,16 +27,36 @@ class SpotifyRefresh:
         if npm_path is None:
             raise FileNotFoundError("npm が見つかりません。Node.js/npm をインストールし、PATH を設定してください。")
 
-        # 実行したいコマンド
+        # 実行したいコマンド（非ブロッキング）
         listCmd = [npm_path, "run", "refresh"]
 
-        # 作業ディレクトリを指定して実行
-        result = subprocess.run(listCmd, cwd=str(target_dir), capture_output=True, text=True, shell=False)
+        # 非ブロッキングで起動し、ログへリダイレクト
+        log_path = target_dir / "refresh.log"
+        creationflags = 0
+        if os.name == "nt":
+            # コンソールウィンドウを出さない（Windows のみ）
+            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
-        # 標準出力と標準エラーを表示
-        print("stdout:", result.stdout)
-        print("stderr:", result.stderr)
-        return result.stdout
+        log_file = open(log_path, "a", encoding="utf-8")
+        try:
+            process = subprocess.Popen(
+                listCmd,
+                cwd=str(target_dir),
+                stdout=log_file,
+                stderr=log_file,
+                shell=False,
+                start_new_session=True,
+                creationflags=creationflags,
+            )
+        finally:
+            # Popen にファイルハンドルが引き渡された後はクローズしてよい
+            try:
+                log_file.close()
+            except Exception:
+                pass
+
+        print(f"Spotify refresh started (PID={process.pid}). Logs: {log_path}")
+        return process.pid
 if __name__ == "__main__":
     spotify_refresh = SpotifyRefresh()
     spotify_refresh.refresh()
