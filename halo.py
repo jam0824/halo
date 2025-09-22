@@ -1,10 +1,9 @@
 import re
 import json
 import urllib.request
-import urllib.error
 import threading
 import time
-from typing import Optional, TYPE_CHECKING, Union
+from typing import Optional, Union
 
 from command_selector import CommandSelector
 from llm import LLM
@@ -19,10 +18,7 @@ from helper.asr_coherence import ASRCoherenceFilter
 from helper.vad import VAD
 from helper.similarity import TextSimilarity
 from halo_mcp.spotify_refresh import SpotifyRefresh
-
-if TYPE_CHECKING:
-    from function_led import LEDBlinker
-    from function_motor import Motor
+from motor_controller import MotorController
 
 class Halo:
     def __init__(self):
@@ -38,11 +34,6 @@ class Halo:
         self.change_name: dict = self.config["change_text"]
         self.isfiller: bool = self.config["filler"]["use_filler"]
         self.filler_dir: str = self.config["filler"]["filler_dir"]
-        self.use_led: bool = self.config["led"]["use_led"]
-        self.led_pin: int = self.config["led"]["led_pin"]
-        self.use_motor: bool = self.config["motor"]["use_motor"]
-        self.pan_pin: int = self.config["motor"]["pan_pin"]
-        self.tilt_pin: int = self.config["motor"]["tilt_pin"]
         self.interrupt_word: str = self.config["interrupt_word"]
         self.coherence_threshold: float = self.config["coherence_threshold"]
 
@@ -53,6 +44,7 @@ class Halo:
         self.farewell_word: str = self.config["farewell_word"]
         self.farewell_word_pattern = re.compile(self.farewell_word)
 
+        self.motor_controller = MotorController(self.config)
         self.command_selector = CommandSelector()
         self.llm = LLM()
         self.stt = self.load_stt(self.stt_type)
@@ -74,26 +66,6 @@ class Halo:
         # fake_memory用
         self.fake_memory_text = self.get_fake_diary_text(self.config)
         self.fake_summary_text = self.get_fake_summary_text(self.config)
-
-        self.led: Optional["LEDBlinker"] = None
-        if self.use_led:
-            try:
-                from function_led import LEDBlinker  # 遅延インポート
-                self.led = LEDBlinker(self.led_pin)
-            except Exception as e:
-                print(f"LED機能を無効化します: {e}")
-                self.use_led = False
-                self.led = None
-
-        self.motor: Optional["Motor"] = None
-        if self.use_motor:
-            try:
-                from function_motor import Motor
-                self.motor = Motor(self.pan_pin, self.tilt_pin)
-            except Exception as e:
-                print(f"モーター機能を無効化します: {e}")
-                self.use_motor = False
-                self.motor = None
         
         self.corr_gate = self.init_corr_gate(self.config.get("vad", {}))
         self.tts = self.init_tts(self.tts_config)
@@ -130,7 +102,6 @@ class Halo:
         )
         return tts
 
-
     def init_spotify(self):
         try:
             spotify_refresh = SpotifyRefresh().refresh()
@@ -138,6 +109,7 @@ class Halo:
             print(f"Spotify refresh でエラー: {e}")
         return
 
+    # ---------- get fake memory ----------
     def get_fake_diary_text(self, config: dict) -> str:
         if not config["fake_memory"]["use_fake_memory"]:
             return ""
@@ -150,6 +122,7 @@ class Halo:
         url = f"{config['fake_memory']['fake_memory_endpoint']}summary/{self.halo_helper.get_today()}"
         return self._get_fake_memory_text(config["fake_memory"]["use_fake_memory"], url)
 
+    
     def _get_fake_memory_text(self, use_fake_memory: bool, fake_memory_endpoint: str) -> str:
         if not use_fake_memory:
             return ""
@@ -170,6 +143,7 @@ class Halo:
             print(f"fake_memory取得エラー: {e}")
             return
 
+    # ---------- pre warm up ----------
     def pre_warm_up(self, stt, llm, llm_model, system_content):
         # プリウォーム
         try:
@@ -195,7 +169,7 @@ class Halo:
                 self.config["vad"]["waiting_min_consecutive_speech_frames"]):
                 time.sleep(0.1)
                 continue
-            first_text = self.stt.listen_once()
+            first_text = self.stt.listen_once_fast(motor_controller=self.motor_controller)
             if not self.wakeup_word_pattern.match(first_text):
                 print("ウェイクアップキーワードが含まれていません")
                 time.sleep(0.1)
@@ -222,7 +196,7 @@ class Halo:
                         time.sleep(0.1)
                         continue
 
-                    user_text = self.stt.listen_once()
+                    user_text = self.stt.listen_once_fast(motor_controller=self.motor_controller)
                     if not user_text or user_text == "":
                         time.sleep(0.1)
                         continue
@@ -280,10 +254,8 @@ class Halo:
             except Exception:
                 pass
             try:
-                self.stop_led()
-                if self.use_led and self.led:
-                    self.led.off()
-                self.stop_motor()
+                self.motor_controller.led_stop_blink()
+                self.motor_controller.stop_motor()
             except Exception:
                 pass
 
@@ -298,8 +270,8 @@ class Halo:
         # 進行中があれば停止
         with self.tts_lock:
             self.stop_tts()
-            self.stop_led()
-            self.stop_motor()
+            self.motor_controller.led_stop_blink()
+            self.motor_controller.stop_motor()
             # 再生停止の完了を待つ（短時間）
             try:
                 # まずはスレッドの終了を待機
@@ -310,8 +282,8 @@ class Halo:
             
             def _run():
                 try:
-                    self.move_pan_kyoro_kyoro(1, 2)
-                    self.tts.speak(text, self.led, self.use_led, self.motor, self.use_motor, corr_gate=self.corr_gate, filler=self.filler)
+                    self.motor_controller.motor_pan_kyoro_kyoro(1, 2)
+                    self.tts.speak(text, self.motor_controller, corr_gate=self.corr_gate, filler=self.filler)
                 except Exception as e:
                     print(f"TTSエラー: {e}")
 
@@ -359,7 +331,7 @@ class Halo:
         if self.farewell_word_pattern.match(txt):
             farewell = "バイバイ！"
             print(f"{self.your_name}: {farewell}")
-            self.tts.speak(farewell, self.led, self.use_led, self.motor, self.use_motor, corr_gate=self.corr_gate)
+            self.tts.speak(farewell, self.motor_controller, corr_gate=self.corr_gate)
             return True
         return False
 
@@ -374,10 +346,9 @@ class Halo:
 
     def say_filler(self) -> bool:
         if self.filler.say_filler():
-            if self.use_led and self.led:
-                self.led.start_blink()
-            self.move_tilt_kyoro_kyoro(2)
-            self.move_pan_kyoro_kyoro(1, 2)
+            self.motor_controller.led_start_blink()
+            self.motor_controller.motor_tilt_kyoro_kyoro(2)
+            self.motor_controller.motor_pan_kyoro_kyoro(1, 2)
             return True
         return False
 
@@ -405,29 +376,6 @@ class Halo:
         if is_noisy:
             return True
         return False
-
-    # ---------- メカ ----------
-    # LED停止
-    def stop_led(self):
-        if self.use_led and self.led:
-            self.led.stop_blink()
-        return
-    # モーター停止
-    def stop_motor(self):
-        if self.use_motor and self.motor:
-            try:
-                self.motor.stop_motion()
-            except Exception as e:
-                print(f"モーター停止エラー: {e}")
-        return
-    # pan動作
-    def move_pan_kyoro_kyoro(self, speed: float = 1, count: int = 1):
-        if self.use_motor and self.motor:
-            self.motor.pan_kyoro_kyoro(80, 100, speed, count)
-    # tilt動作
-    def move_tilt_kyoro_kyoro(self, count: int = 1):
-        if self.use_motor and self.motor:
-            self.motor.motor_kuchipaku()
 
     # ---------- STT ----------
     def load_stt(self,stt_type: str) -> Union[AzureSpeechToText, GoogleSpeechToText]:

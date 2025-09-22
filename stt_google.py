@@ -6,6 +6,7 @@ import threading
 from typing import Optional, Callable, Iterator, Tuple
 
 from google.cloud import speech
+from motor_controller import MotorController
 
 import pyaudio
 
@@ -232,7 +233,7 @@ class GoogleSpeechToText:
                 print(f"[listen_streaming_iter] error: {e}")
             return
 
-    def listen_once(self, timeout_sec: float = 15.0, rpc_timeout_sec: float = 45.0) -> str:
+    def listen_once_fast(self, timeout_sec: float = 15.0, rpc_timeout_sec: float = 45.0, motor_controller = None) -> str:
         
         deadline = time.time() + float(timeout_sec)
 

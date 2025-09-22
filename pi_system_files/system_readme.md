@@ -32,7 +32,7 @@ sudo systemctl restart halo.service
 
 # serviceを止めたいとき
 ```
-sudo systemctl stop
+sudo systemctl stop halo.service
 ```
 自動起動を止めたい場合
 ```
