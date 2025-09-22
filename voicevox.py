@@ -6,11 +6,10 @@ import time
 from io import BytesIO
 from typing import Dict, Optional, TYPE_CHECKING
 
+from motor_controller import MotorController
 import requests
 import simpleaudio as sa
-if TYPE_CHECKING:
-    from function_led import LEDBlinker
-    from function_motor import Motor
+
 
 
 class VoiceVoxTTS:
@@ -52,8 +51,6 @@ class VoiceVoxTTS:
         }
         if default_params:
             self.params.update(default_params)
-        self.led = None
-        self.isLed = False
 
         # 実行時制御
         self._stop_event = threading.Event()
@@ -70,17 +67,13 @@ class VoiceVoxTTS:
 
     def speak(self, 
         text: str, 
-        led: Optional["LEDBlinker"], isLed: bool, 
-        motor: Optional["Motor"], isMotor: bool, 
+        motor_controller: MotorController, 
         corr_gate=None, 
         filler=None):
         """
         同期実行：合成＆再生を行い、完了（または stop()）まで戻らない。
         """
-        self.led = led
-        self.isLed = isLed
-        self.motor = motor
-        self.isMotor = isMotor
+        self.motor_controller = motor_controller
         self._stop_event.clear()
         self._is_speaking = True
         self.filler = filler
@@ -134,7 +127,7 @@ class VoiceVoxTTS:
             with self._suppress_ex():
                 if self._play_obj:
                     self._play_obj.stop()
-                    self._led_stop_blink()
+                    self.motor_controller.led_stop_blink()  # LED点滅停止
                     print("音声再生終了")
             self._drain_queue(q)
 
@@ -213,8 +206,8 @@ class VoiceVoxTTS:
             wav = sa.WaveObject.from_wave_read(wf)
         if self.filler is not None:
             self.filler.stop_filler()
-        self._led_start_blink()
-        self._motor_tilt()
+        self.motor_controller.led_start_blink()
+        self.motor_controller.motor_tilt_kyoro_kyoro(2)
         self._play_obj = wav.play()
     
     def _wav_to_int16_mono16k(self, wav_bytes: bytes):
@@ -233,24 +226,6 @@ class VoiceVoxTTS:
             x_new = np.arange(0, len(pcm), 1/ratio)
             pcm = np.interp(x_new, x_old, pcm.astype(np.float32)).astype(np.int16)
         return pcm
-    
-    def _led_start_blink(self):
-        if self.isLed and self.led is not None:
-            self.led.start_blink()
-            print("LED 点滅開始")
-
-    def _led_stop_blink(self):
-        if self.isLed and self.led is not None:
-            try:
-                self.led.stop_blink(wait=True)
-            except Exception:
-                pass
-            print("LED 点滅終了")
-
-    def _motor_tilt(self):
-        if self.isMotor and self.motor is not None:
-            self.motor.motor_kuchipaku()
-            print("おしゃべり用モーター稼働")
 
     @staticmethod
     def _drain_queue(q: "queue.Queue"):
@@ -269,15 +244,11 @@ class VoiceVoxTTS:
     
     _SENT_END = re.compile(r"[。．！？!?]\s*$")  # 文末検出（日本語/記号）
 
-    def stream_speak(self, token_iter, led: Optional["LEDBlinker"], isLed: bool, motor: Optional["Motor"], isMotor: bool, corr_gate=None):
+    def stream_speak(self, token_iter, motor_controller: MotorController, corr_gate=None):
         """
         ストリーミング入力（文字列断片のイテレータ）を文単位にまとめて
         でき次第 VOICEVOX で合成→即時再生する。stop() で中断可。
         """
-        self.led = led
-        self.isLed = isLed
-        self.motor = motor
-        self.isMotor = isMotor
         self._stop_event.clear()
         start_time = time.perf_counter()
         q: "queue.Queue" = queue.Queue(maxsize=self.queue_size)
