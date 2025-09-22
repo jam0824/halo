@@ -2,10 +2,12 @@ import os
 import threading
 from typing import Optional
 import azure.cognitiveservices.speech as speechsdk
+from motor_controller import MotorController
 
 class AzureSpeechToText:
     def __init__(self, language: str = "ja-JP", subscription: Optional[str] = None,
                  region: Optional[str] = None, device_id: Optional[str] = None):
+        self.is_motion = False    # LEDやモーターが作動中か
         self.language = language
         self.subscription = subscription or os.environ.get("SPEECH_KEY")
         self.region = region or os.environ.get("SPEECH_REGION")
@@ -43,30 +45,36 @@ class AzureSpeechToText:
         # 事前に接続を開いておく（初回の遅延対策）
         self.connection = speechsdk.Connection.from_recognizer(self.recognizer)
 
-    def listen_once_fast(self, print_interim: bool = True, session_timeout_sec: float = 15.0) -> str:
+    def listen_once_fast(self, print_interim: bool = True, session_timeout_sec: float = 15.0, motor_controller = None) -> str:
         """
         連続認識で最初の確定が来たら即停止して返す。
         """
+        self.motor_controller = motor_controller
         result_text = {"text": ""}  # クロージャで書き換えたいのでdictで包む
         done = threading.Event()
 
         def on_recognizing(evt):
             if print_interim:
                 print("中間:", evt.result.text)
+                self.start_motion()
 
         def on_recognized(evt):
             # 最初の確定を受けたら即停止して返す
             if evt.result.reason == speechsdk.ResultReason.RecognizedSpeech:
                 print("確定:", evt.result.text)
+                self.stop_motion()
                 result_text["text"] = evt.result.text or ""
                 done.set()
 
         def on_canceled(evt):
             print("キャンセル:", evt.reason, evt.error_details or "")
+            self.stop_motion()
             done.set()
+            
 
         def on_session_stopped(evt):
             print("=== 認識終了 ===")
+            self.stop_motion()
 
         # ハンドラ登録
         self.recognizer.recognizing.connect(on_recognizing)
@@ -115,6 +123,17 @@ class AzureSpeechToText:
             self.connection.close()
         except Exception:
             pass
+    def start_motion(self):
+        if not self.is_motion:
+            self.is_motion = True
+            self.motor_controller.led_on()
+            self.motor_controller.motor_tilt_change_angle(110)
+
+    def stop_motion(self):
+        if self.is_motion:
+            self.is_motion = False
+            self.motor_controller.led_off()
+            self.motor_controller.motor_tilt_start_angle()
 
 if __name__ == "__main__":
     stt = AzureSpeechToText()

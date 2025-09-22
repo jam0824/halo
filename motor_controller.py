@@ -1,6 +1,7 @@
 from typing import Optional, TYPE_CHECKING
 from helper.halo_helper import HaloHelper
 import time
+import threading
 
 if TYPE_CHECKING:
     from function_led import LEDBlinker
@@ -38,7 +39,13 @@ class MotorController:
     # ---------- LED ----------
     def led_on(self):
         if self.use_led and self.led:
-            self.led.on()
+            try:
+                threading.Thread(
+                    target=self.led.on,
+                    daemon=True,
+                ).start()
+            except Exception as e:
+                print(f"led_on 非ブロッキング起動失敗: {e}")
         return
     def led_off(self):
         if self.use_led and self.led:
@@ -62,11 +69,35 @@ class MotorController:
     # ---------- モーター ----------
     def motor_tilt_change_angle(self, angle: float):
         if self.use_motor and self.motor:
-            self.motor.tilt_change_angle(angle)
+            try:
+                threading.Thread(
+                    target=self.motor.change_tilt_angle,
+                    args=(angle,),
+                    daemon=True,
+                ).start()
+            except Exception as e:
+                print(f"motor_tilt_change_angle 非ブロッキング起動失敗: {e}")
+        return
+    def motor_tilt_start_angle(self):
+        if self.use_motor and self.motor:
+            angle = self.motor.TILT_START_ANGLE
+            self.motor_tilt_change_angle(angle)
         return
     def motor_pan_change_angle(self, angle: float):
         if self.use_motor and self.motor:
-            self.motor.pan_change_angle(angle)
+            try:
+                threading.Thread(
+                    target=self.motor.change_pan_angle,
+                    args=(angle,),
+                    daemon=True,
+                ).start()
+            except Exception as e:
+                print(f"motor_pan_change_angle 非ブロッキング起動失敗: {e}")
+        return
+    def motor_pan_start_angle(self):
+        if self.use_motor and self.motor:
+            angle = self.motor.PAN_START_ANGLE
+            self.motor_pan_change_angle(angle)
         return
     # モーター停止
     def stop_motor(self):

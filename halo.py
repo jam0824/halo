@@ -1,10 +1,9 @@
 import re
 import json
 import urllib.request
-import urllib.error
 import threading
 import time
-from typing import Optional, TYPE_CHECKING, Union
+from typing import Optional, Union
 
 from command_selector import CommandSelector
 from llm import LLM
@@ -109,8 +108,8 @@ class Halo:
         except Exception as e:
             print(f"Spotify refresh でエラー: {e}")
         return
-        
-    # ---------- fake memory ----------
+
+    # ---------- get fake memory ----------
     def get_fake_diary_text(self, config: dict) -> str:
         if not config["fake_memory"]["use_fake_memory"]:
             return ""
@@ -144,6 +143,7 @@ class Halo:
             print(f"fake_memory取得エラー: {e}")
             return
 
+    # ---------- pre warm up ----------
     def pre_warm_up(self, stt, llm, llm_model, system_content):
         # プリウォーム
         try:
@@ -169,7 +169,7 @@ class Halo:
                 self.config["vad"]["waiting_min_consecutive_speech_frames"]):
                 time.sleep(0.1)
                 continue
-            first_text = self.stt.listen_once()
+            first_text = self.stt.listen_once_fast(motor_controller=self.motor_controller)
             if not self.wakeup_word_pattern.match(first_text):
                 print("ウェイクアップキーワードが含まれていません")
                 time.sleep(0.1)
@@ -196,7 +196,7 @@ class Halo:
                         time.sleep(0.1)
                         continue
 
-                    user_text = self.stt.listen_once()
+                    user_text = self.stt.listen_once_fast(motor_controller=self.motor_controller)
                     if not user_text or user_text == "":
                         time.sleep(0.1)
                         continue
