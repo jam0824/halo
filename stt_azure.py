@@ -1,6 +1,6 @@
 import os
 import threading
-from typing import Optional
+from typing import Optional, Callable
 import azure.cognitiveservices.speech as speechsdk
 from motor_controller import MotorController
 
@@ -45,7 +45,14 @@ class AzureSpeechToText:
         # 事前に接続を開いておく（初回の遅延対策）
         self.connection = speechsdk.Connection.from_recognizer(self.recognizer)
 
-    def listen_once_fast(self, print_interim: bool = True, session_timeout_sec: float = 15.0, motor_controller = None) -> str:
+    def listen_once_fast(
+        self,
+        print_interim: bool = True,
+        session_timeout_sec: float = 15.0,
+        motor_controller = None,
+        on_interim: Optional[Callable[[str], None]] = None,
+        on_final: Optional[Callable[[str], None]] = None,
+    ) -> str:
         """
         連続認識で最初の確定が来たら即停止して返す。
         """
@@ -54,9 +61,14 @@ class AzureSpeechToText:
         done = threading.Event()
 
         def on_recognizing(evt):
-            if print_interim:
-                print("中間:", evt.result.text)
-                self.start_motion()
+            #if print_interim:
+            #   print("中間:", evt.result.text)
+            try:
+                if on_interim is not None:
+                    on_interim(evt.result.text)
+            except Exception:
+                pass
+            self.start_motion()
 
         def on_recognized(evt):
             # 最初の確定を受けたら即停止して返す
@@ -64,6 +76,11 @@ class AzureSpeechToText:
                 print("確定:", evt.result.text)
                 self.stop_motion()
                 result_text["text"] = evt.result.text or ""
+                try:
+                    if on_final is not None:
+                        on_final(result_text["text"])
+                except Exception:
+                    pass
                 done.set()
 
         def on_canceled(evt):

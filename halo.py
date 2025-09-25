@@ -2,6 +2,7 @@ import re
 import json
 import urllib.request
 import threading
+import asyncio
 import time
 from typing import Optional, Union
 
@@ -19,6 +20,7 @@ from helper.vad import VAD
 from helper.similarity import TextSimilarity
 from halo_mcp.spotify_refresh import SpotifyRefresh
 from motor_controller import MotorController
+from halo_janome import JapaneseNounExtractor
 
 class Halo:
     def __init__(self):
@@ -53,6 +55,7 @@ class Halo:
         self.filler = Filler(self.isfiller, self.filler_dir)
         self.system_content = self.halo_helper.load_system_prompt_and_replace(self.owner_name, self.your_name)
         print(self.system_content)
+        self.janome = JapaneseNounExtractor()
 
         # 常時STT運用用の状態
         self.history: str = ""
@@ -61,6 +64,8 @@ class Halo:
         # TTSをバックグラウンドで回すためのスレッド管理
         self.tts_thread: Optional[threading.Thread] = None
         self.tts_lock = threading.Lock()
+        self.tts_filler_thread: Optional[threading.Thread] = None
+        self.tts_filler_lock = threading.Lock()
         # STT安定化用カウンタ
         self._stt_fail_count: int = 0
         # fake_memory用
@@ -69,6 +74,7 @@ class Halo:
         
         self.corr_gate = self.init_corr_gate(self.config.get("vad", {}))
         self.tts = self.init_tts(self.tts_config)
+        self.tts_filler = self.init_tts(self.tts_config)
         self.init_spotify()
 
         
@@ -196,7 +202,7 @@ class Halo:
                         time.sleep(0.1)
                         continue
 
-                    user_text = self.stt.listen_once_fast(motor_controller=self.motor_controller)
+                    user_text = self.listen_with_nouns()
                     if not user_text or user_text == "":
                         time.sleep(0.1)
                         continue
@@ -259,6 +265,28 @@ class Halo:
             except Exception:
                 pass
 
+    # ---------- stt ----------
+    def listen_with_nouns(self) -> str:
+        self.janome.reset_keyword_filler()
+        # 途中結果の出力用ハンドラ
+        def _on_interim(txt: str):
+            try:
+                print(f"[interim] {txt}")
+                def _task():
+                    try:
+                        # 普通名詞・固有名詞でフィラーを生成
+                        keyword_filler = asyncio.run(self.janome.make_keyword_filler_async(txt))
+                        if keyword_filler != "":
+                            print(f"[keyword_filler] {keyword_filler}")
+                            self.speak_filler_async(keyword_filler)
+                    except Exception:
+                        pass
+                threading.Thread(target=_task, daemon=True).start()
+            except Exception:
+                pass
+        user_text = self.stt.listen_once_fast(motor_controller=self.motor_controller, on_interim=_on_interim)
+        return user_text
+
     # ---------- tts control ----------
     def stop_tts(self) -> None:
         try:
@@ -283,12 +311,48 @@ class Halo:
             def _run():
                 try:
                     self.motor_controller.motor_pan_kyoro_kyoro(1, 2)
-                    self.tts.speak(text, self.motor_controller, corr_gate=self.corr_gate, filler=self.filler)
+                    self.tts.speak(text, self.motor_controller, corr_gate=self.corr_gate, filler=self.filler, filler_tts=self.tts_filler)
                 except Exception as e:
                     print(f"TTSエラー: {e}")
 
             self.tts_thread = threading.Thread(target=_run, daemon=True)
             self.tts_thread.start()
+
+    #---------- keyword filler用tts  ----------
+    '''
+    本会話の読み上げ直前(_play時)に発話を停止させたかったが
+    同一メソッドを使うのは上手くいかなかったため別メソッドで対応。
+    良いやり方があれば修正
+    '''
+    def stop_filler_tts(self) -> None:
+        try:
+            self.tts_filler.stop()
+        except Exception:
+            pass
+
+    def speak_filler_async(self, text: str) -> None:
+        # 進行中があれば停止
+        with self.tts_filler_lock:
+            self.stop_filler_tts()
+            self.motor_controller.led_stop_blink()
+            self.motor_controller.stop_motor()
+            # 再生停止の完了を待つ（短時間）
+            try:
+                # まずはスレッドの終了を待機
+                if self.tts_filler_thread and self.tts_filler_thread.is_alive():
+                    self.tts_filler_thread.join(timeout=1.0)
+            except Exception as e:
+                print(f"TTSスレッド終了エラー: {e}")
+            
+            def _run():
+                try:
+                    self.motor_controller.motor_pan_kyoro_kyoro(1, 2)
+                    self.tts_filler.speak(text, self.motor_controller, corr_gate=self.corr_gate, filler=self.filler)
+                except Exception as e:
+                    print(f"TTSエラー: {e}")
+
+            self.tts_filler_thread = threading.Thread(target=_run, daemon=True)
+            self.tts_filler_thread.start()
     # ---------- コマンド実行 ----------
     def exec_command(self, command: str) -> str:
         if self.command == "":
@@ -385,6 +449,8 @@ class Halo:
             return GoogleSpeechToText()
         else:
             raise ValueError(f"Invalid STT type: {stt_type}")
+
+    
 
 if __name__ == "__main__":
     halo = Halo()
