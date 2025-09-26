@@ -19,13 +19,9 @@ tts.push_text("今はパイプライン実装で、")
 time.sleep(0.2)
 tts.push_text("再生しながら同時に次の文を合成しています。")
 tts.push_text("疑問文は上がり調子になりますか？")
-time.sleep(15)
+time.sleep(1)
 tts.push_text("しばらく待ってから話しています。")
 tts.push_text("ちょっと長めの文章を話しています。少し長いかもしれません。")
-time.sleep(1)
-tts.stop()                               # 合成・再生・キューを即時クリア
-tts.start_stream(motor_controller=motor) # 常駐スレッドを再起動
-tts.push_text("割り込みです。新しい話題に移ります。")
 time.sleep(1)
 
 tts.close_stream()

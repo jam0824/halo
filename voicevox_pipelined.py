@@ -1,4 +1,4 @@
-# tts_pipelined.py
+# tts_pipelined_bargein.py
 import wave
 import re
 import queue
@@ -10,6 +10,7 @@ from typing import Dict, Optional
 import requests
 import simpleaudio as sa
 
+# 実機では本物のMotorControllerを使ってください
 try:
     from motor_controller import MotorController
 except Exception:
@@ -21,27 +22,31 @@ except Exception:
 
 class VoiceVoxTTSPipelined:
     """
-    VOICEVOX: 文の合成(並列) と 再生(順序保証) をパイプライン化した常駐ストリームTTS。
+    VOICEVOX 常駐ストリームTTS（合成と再生のパイプライン + エポック割り込み対応）
       - start_stream(..., synth_workers=N): 常駐開始（N並列で合成）
       - push_text(text): 断片を何度でも投入。文末/長さで文にスプリット
       - close_stream(): これ以上入力が無いことを通知（残りを読み上げて終了）
-      - wait_until_idle(): 再生完了まで待機（任意）
-      - stop(): 即時停止（緊急）
+      - wait_until_idle(): 合成/再生の完了待ち（任意）
+      - stop(): 即時停止（緊急・全部止める）
       - shutdown(): 安全終了（プロセス終了時に）
+      - barge_in(text, mode="hard"|"soft"):
+          * hard: 今の再生も即停止→旧バッファ破棄→新規話題を即再生
+          * soft: 今の文は言い切ってから旧バッファ破棄→新規話題へ
     """
 
-    _SENT_END = re.compile(r"[。．！？!?]\s*$")
+    _SENT_END = re.compile(r"[。．！？!?]\s*$")  # 文末検出
 
     def __init__(
         self,
         base_url: str = "http://127.0.0.1:50021",
         speaker: int = 89,
         max_len: int = 80,
-        queue_size_sent: int = 32,    # 文キュー
+        queue_size_sent: int = 32,    # 文キューのサイズ
         request_timeout_query: int = 15,
         request_timeout_synth: int = 60,
         default_params: Optional[Dict] = None,
     ):
+        # VOICEVOX設定
         self.base_url = base_url
         self.speaker = speaker
         self.max_len = max_len
@@ -61,10 +66,12 @@ class VoiceVoxTTSPipelined:
         if default_params:
             self.params.update(default_params)
 
-        # 再生・状態
+        # 外部連携
         self._motor: Optional[MotorController] = None
         self._filler = None
         self._corr_gate = None
+
+        # 再生
         self._play_obj: Optional[sa.PlayObject] = None
 
         # 制御フラグ
@@ -74,20 +81,29 @@ class VoiceVoxTTSPipelined:
         self._is_speaking = False
         self._state_lock = threading.Lock()
 
-        # キュー/共有
-        self._in_q: "queue.Queue[str]" = queue.Queue(maxsize=1024)                 # 断片
-        self._sent_q: "queue.Queue[tuple[int, str]]" = queue.Queue(self.queue_size_sent)  # (seq, 文)
+        # 入出力キュー
+        self._in_q: "queue.Queue[str]" = queue.Queue(maxsize=1024)  # 断片投入
+        # sent_q: (epoch, seq, sentence)
+        self._sent_q: "queue.Queue[tuple[int, int, str]]" = queue.Queue(self.queue_size_sent)
 
-        # 合成結果（順序保持用）
-        self._results: Dict[int, bytes] = {}
-        self._results_cv = threading.Condition()  # _results と _next_seq 用
-        self._next_seq = 0
-        self._seq_counter = 0
+        # エポック/順序管理
+        self._epoch = 0                 # 新規に生成される文の世代
+        self._player_epoch = 0          # プレーヤが再生中/待機中の世代
+        self._seq_counter = 0           # 現エポックで新規付与するseq
+        self._next_seq = 0              # プレーヤが次に欲しいseq
+        self._flush_after_current = False  # soft割り込み用：現行文の直後に一掃・切替
+
+        # 合成結果（epochごとに {seq: wav_bytes}）
+        self._results: Dict[int, Dict[int, bytes]] = {}
+        self._results_cv = threading.Condition()  # _results / _player_epoch / _next_seq の同期
 
         # スレッド
         self._th_ingest: Optional[threading.Thread] = None
         self._th_player: Optional[threading.Thread] = None
         self._th_synths: list[threading.Thread] = []
+
+        # HTTPセッション（小さく効く）
+        self._http = requests.Session()
 
     # ---------- Public API ----------
     def set_params(self, **kwargs):
@@ -109,18 +125,18 @@ class VoiceVoxTTSPipelined:
             self._corr_gate = corr_gate
             self._filler = filler
 
-            # ingest
+            # ingest（断片→文）
             self._th_ingest = threading.Thread(target=self._run_ingest, name="tts_ingest", daemon=True)
             self._th_ingest.start()
 
-            # synth workers
+            # 合成ワーカー（並列）
             self._th_synths = []
             for i in range(max(1, synth_workers)):
                 th = threading.Thread(target=self._run_synth_worker, name=f"tts_synth_{i}", daemon=True)
                 th.start()
                 self._th_synths.append(th)
 
-            # player
+            # プレーヤ
             self._th_player = threading.Thread(target=self._run_player, name="tts_player", daemon=True)
             self._th_player.start()
 
@@ -142,7 +158,7 @@ class VoiceVoxTTSPipelined:
             time.sleep(poll)
 
     def stop(self):
-        """即時停止（キュー排水・再生停止）"""
+        """即時停止（すべて中断・破棄）"""
         self._stop_event.set()
         with self._suppress_ex():
             if self._play_obj:
@@ -152,6 +168,18 @@ class VoiceVoxTTSPipelined:
         with self._results_cv:
             self._results.clear()
             self._results_cv.notify_all()
+
+    def shutdown(self, timeout: float = 2.0):
+        """安全終了（アプリ終了時）"""
+        self.close_stream()
+        self.wait_until_idle()
+        self._stop_event.set()
+        for th in ([self._th_ingest] + self._th_synths + [self._th_player]):
+            if th and th.is_alive():
+                th.join(timeout=timeout)
+        with self._state_lock:
+            self._started = False
+            self._is_speaking = False
 
     def is_playing(self) -> bool:
         if self._stop_event.is_set():
@@ -165,16 +193,46 @@ class VoiceVoxTTSPipelined:
                 return False
         return False
 
-    def shutdown(self, timeout: float = 2.0):
-        self.close_stream()
-        self.wait_until_idle()
-        self._stop_event.set()
-        for th in ([self._th_ingest] + self._th_synths + [self._th_player]):
-            if th and th.is_alive():
-                th.join(timeout=timeout)
-        with self._state_lock:
-            self._started = False
-            self._is_speaking = False
+    # --- 割り込み（barge-in） ---
+    def barge_in(self, text: str, mode: str = "hard"):
+        """
+        mode="hard": 今の再生も即停止。旧世代のキュー/結果を破棄し、新規世代へ切替。
+        mode="soft": 今の文は言い切ってから一掃→新規世代へ切替。
+        """
+        if mode not in ("hard", "soft"):
+            mode = "hard"
+
+        # 新しいエポックを開始（以後の文はこの世代で生成される）
+        self._epoch += 1
+
+        # 旧データを捨てる：入力断片/文キュー/結果
+        self._drain_queue(self._in_q)
+        self._drain_queue(self._sent_q)
+        with self._results_cv:
+            self._results.clear()
+            self._results_cv.notify_all()
+
+        # 新世代の採番リセット（再生側は後述）
+        self._seq_counter = 0
+
+        if mode == "hard":
+            # いま鳴っている音も止める → ただちに再生側も新世代へ
+            with self._suppress_ex():
+                if self._play_obj:
+                    self._play_obj.stop()
+            with self._results_cv:
+                self._player_epoch = self._epoch   # 即切替
+                self._next_seq = 0
+                self._flush_after_current = False
+                self._results_cv.notify_all()
+        else:
+            # soft：現在の文を言い切った直後に一掃して切替
+            with self._results_cv:
+                self._flush_after_current = True   # player 側が文末で切替を実行
+                self._results_cv.notify_all()
+
+        # 新しい話題の最初の文を投入
+        self.push_text(text)
 
     # ---------- Threads ----------
     def _run_ingest(self):
@@ -191,8 +249,9 @@ class VoiceVoxTTSPipelined:
                     if self._closed_event.is_set():
                         tail = buf.strip()
                         if tail:
+                            epoch = self._epoch
                             seq = self._seq_counter; self._seq_counter += 1
-                            self._sent_q.put((seq, tail))
+                            self._sent_q.put((epoch, seq, tail))
                         break
                     continue
 
@@ -200,8 +259,9 @@ class VoiceVoxTTSPipelined:
                 if len(buf) >= self.max_len or self._SENT_END.search(buf):
                     s = buf.strip()
                     if s:
+                        epoch = self._epoch
                         seq = self._seq_counter; self._seq_counter += 1
-                        self._sent_q.put((seq, s))
+                        self._sent_q.put((epoch, seq, s))
                     buf = ""
 
             except Exception:
@@ -212,16 +272,18 @@ class VoiceVoxTTSPipelined:
         tail = buf.strip()
         if tail:
             with self._suppress_ex():
+                epoch = self._epoch
                 seq = self._seq_counter; self._seq_counter += 1
-                self._sent_q.put((seq, tail))
+                self._sent_q.put((epoch, seq, tail))
 
     def _run_synth_worker(self):
         while not self._stop_event.is_set():
             try:
                 timeout = 0.1 if self._closed_event.is_set() else 1.0
                 try:
-                    seq, sent = self._sent_q.get(timeout=timeout)
+                    epoch, seq, sent = self._sent_q.get(timeout=timeout)
                 except queue.Empty:
+                    # すべて閉じて空なら終了
                     if self._closed_event.is_set() and self._sent_q.empty():
                         break
                     continue
@@ -231,15 +293,16 @@ class VoiceVoxTTSPipelined:
                 query.update(self.params)
                 wav_bytes = self._synth(query, self.speaker)
 
-                # AECにfar-end供給（任意）
+                # AEC等：far-endへ16k/monoで供給（任意）
                 if self._corr_gate is not None:
                     with self._suppress_ex():
                         pcm = self._wav_to_int16_mono16k(wav_bytes)
                         self._corr_gate.publish_farend(pcm)
 
-                # 結果を登録（順序保証はplayer側）
+                # 結果を登録（epoch別）
                 with self._results_cv:
-                    self._results[seq] = wav_bytes
+                    bucket = self._results.setdefault(epoch, {})
+                    bucket[seq] = wav_bytes
                     self._results_cv.notify_all()
 
             except Exception:
@@ -251,28 +314,31 @@ class VoiceVoxTTSPipelined:
         try:
             while not self._stop_event.is_set():
                 with self._results_cv:
-                    # 次に再生すべき seq が来るまで待つ
-                    while (self._next_seq not in self._results) and not self._stop_event.is_set():
-                        # すべて閉じて空なら終了
-                        if (self._closed_event.is_set() and
+                    # 再生対象は self._player_epoch / self._next_seq
+                    while True:
+                        # 現在のバケツ
+                        bucket = self._results.get(self._player_epoch, {})
+                        if self._next_seq in bucket:
+                            wav_bytes = bucket.pop(self._next_seq)
+                            break  # 再生へ
+                        # 終了判定（クローズ & 何も残っていない）
+                        all_empty = (
+                            self._closed_event.is_set() and
+                            self._in_q.empty() and
                             self._sent_q.empty() and
-                            not self._results and
-                            (self._next_seq >= self._seq_counter)):
+                            not any(self._results.values())
+                        )
+                        if all_empty:
                             return
+                        # まだ来てない → 待機
                         self._results_cv.wait(timeout=0.2)
-
-                    if self._stop_event.is_set():
-                        break
-
-                    wav_bytes = self._results.pop(self._next_seq, None)
-
-                if wav_bytes is None:
-                    continue  # もう一度待つ
+                        if self._stop_event.is_set():
+                            return
 
                 # 再生
                 self._play(wav_bytes)
 
-                # ログ：初回からのレイテンシ
+                # 初回からのレイテンシログ
                 end_time = time.perf_counter()
                 print(f"[VoiceVox latency] {end_time - start_time:.1f} s")
 
@@ -280,7 +346,20 @@ class VoiceVoxTTSPipelined:
                 if self._play_obj:
                     self._play_obj.wait_done()
 
+                # 次の文へ
                 self._next_seq += 1
+
+                # ソフト割り込み：現在の文が終わった直後に旧世代を一掃して切替
+                with self._results_cv:
+                    if self._flush_after_current:
+                        self._flush_after_current = False
+                        # 旧世代の残りを捨てる
+                        self._results.pop(self._player_epoch, None)
+                        # 新世代へ切替
+                        self._player_epoch = self._epoch
+                        self._next_seq = 0
+                        self._results_cv.notify_all()
+
         finally:
             with self._suppress_ex():
                 if self._play_obj:
@@ -289,9 +368,9 @@ class VoiceVoxTTSPipelined:
                     self._motor.led_stop_blink()
             self._is_speaking = False
 
-    # ---------- HTTP / audio ----------
+    # ---------- VOICEVOX HTTP ----------
     def _audio_query(self, text: str, speaker: int) -> Dict:
-        r = requests.post(
+        r = self._http.post(
             f"{self.base_url}/audio_query",
             params={"text": text, "speaker": speaker},
             timeout=self.request_timeout_query,
@@ -300,7 +379,7 @@ class VoiceVoxTTSPipelined:
         return r.json()
 
     def _synth(self, query: Dict, speaker: int) -> bytes:
-        r = requests.post(
+        r = self._http.post(
             f"{self.base_url}/synthesis",
             params={"speaker": speaker},
             json=query,
@@ -343,7 +422,10 @@ class VoiceVoxTTSPipelined:
     def _drain_queue(q: "queue.Queue"):
         with VoiceVoxTTSPipelined._suppress_ex():
             while not q.empty():
-                q.get_nowait()
+                try:
+                    q.get_nowait()
+                except Exception:
+                    break
 
     @staticmethod
     def _suppress_ex():
@@ -351,3 +433,38 @@ class VoiceVoxTTSPipelined:
             def __enter__(self): return self
             def __exit__(self, exc_type, exc, tb): return True
         return _Ctx()
+
+
+# ---- 使い方サンプル ----
+if __name__ == "__main__":
+    import time
+    from helper.halo_helper import HaloHelper
+    from motor_controller import MotorController
+
+    halo_helper = HaloHelper()
+    config = halo_helper.load_config()
+    motor = MotorController(config)
+
+    tts = VoiceVoxTTSPipelined(base_url="http://192.168.1.151:50021", speaker=89, max_len=80)
+    tts.set_params(speedScale=1.0, pitchScale=0.0, intonationScale=1.0)
+
+    tts.start_stream(motor_controller=motor, synth_workers=2)
+
+    tts.push_text("こんにちは。こちらはパイプラインTTSのデモです。")
+    time.sleep(2)
+    tts.push_text("今は通常の読み上げをしています。")
+    time.sleep(2)
+
+    # --- ソフト割り込み（今の文は言い切ってから切替） ---
+    tts.barge_in("ここから新しい話題に移ります。", mode="soft")
+    tts.push_text("まずは概要をお話しします。")
+
+    time.sleep(5)
+
+    # --- ハード割り込み（即停止→即切替） ---
+    tts.barge_in("緊急のお知らせです！ただいまより別件をお伝えします。", mode="hard")
+    tts.push_text("以上が速報でした。")
+    time.sleep(30)
+    tts.close_stream()
+    tts.wait_until_idle()
+    tts.shutdown()
