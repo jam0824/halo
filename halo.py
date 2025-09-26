@@ -21,6 +21,7 @@ from helper.similarity import TextSimilarity
 from halo_mcp.spotify_refresh import SpotifyRefresh
 from motor_controller import MotorController
 from halo_janome import JapaneseNounExtractor
+from voicevox_pipelined import VoiceVoxTTSPipelined
 
 class Halo:
     def __init__(self):
@@ -76,6 +77,10 @@ class Halo:
         self.tts = self.init_tts(self.tts_config)
         self.tts_filler = self.init_tts(self.tts_config)
         self.init_spotify()
+
+        self.tts_pipelined = VoiceVoxTTSPipelined(base_url="http://192.168.1.151:50021", speaker=89, max_len=80)
+        self.tts_pipelined.set_params(speedScale=1.0, pitchScale=0.0, intonationScale=1.0)
+        self.tts_pipelined.start_stream(motor_controller=self.motor_controller, synth_workers=2)
 
         
         # ウォームアップ
@@ -232,7 +237,17 @@ class Halo:
 
                     print("LLMで応答を生成中...")
                     system_memory = self.system_content + self.fake_memory_text
+                    self.response = ""
+                    for delta in self.llm.stream_generate_text(self.llm_model, user_text, system_memory, self.history):
+                        if not delta:
+                            continue
+                        self.response += delta
+                        print(f"[response] {self.response}")
+                        # 逐次テキスト断片をパイプラインへ投入
+                        self.tts_pipelined.push_text(delta)
+                    '''
                     response_text = self.llm.generate_text(self.llm_model, user_text, system_memory, self.history)
+                    self.response = response_text
                     self.response, self.command = self.halo_helper.get_halo_response(response_text)
                     self.history = self.halo_helper.append_history(self.history, self.your_name, self.response)
                     # コマンドがあれば実行
@@ -240,7 +255,9 @@ class Halo:
                     
 
                     # 応答読み上げは非同期で行う
-                    self.speak_async(self.response)
+                    #self.speak_async(self.response)
+                    self.tts_pipelined.push_text(self.response)
+                    '''
                     time_out = time.time() + self.run_timeout_sec    # タイムアウト時間を更新
 
                 except KeyboardInterrupt:
@@ -278,7 +295,7 @@ class Halo:
                         keyword_filler = asyncio.run(self.janome.make_keyword_filler_async(txt))
                         if keyword_filler != "":
                             print(f"[keyword_filler] {keyword_filler}")
-                            self.speak_filler_async(keyword_filler)
+                            self.tts_pipelined.push_text(keyword_filler)
                     except Exception:
                         pass
                 threading.Thread(target=_task, daemon=True).start()
