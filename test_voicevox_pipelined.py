@@ -10,9 +10,10 @@ tts.set_params(speedScale=1.0, pitchScale=0.0, intonationScale=1.0)
 halo_helper = HaloHelper()
 config = halo_helper.load_config()
 motor = MotorController(config)
-tts.start_stream(motor_controller=motor, synth_workers=2)  # 合成2並列
+tts.start_stream(motor_controller=motor, synth_workers=2, autoplay=False)  # 合成2並列
 time.sleep(1)
 print("start")
+tts.talk_resume()
 tts.push_text("こんにちは。")
 time.sleep(0.2)
 tts.push_text("今はパイプライン実装で、")

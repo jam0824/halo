@@ -226,8 +226,11 @@ class Halo:
                     # 文章のチェックして、正しいユーザー発話ではない場合はcontinue
                     if self.check_sentence(user_text, self.response):
                         continue
+                    print(f"is_playing(話してないはず): {self.tts_pipelined.is_object_playing()}")
+
                     # パイプライン再生開始
                     self.tts_pipelined.talk_resume()
+                    # もし会話が走っていたら、その会話はスキップ
 
                     # フィラー再生
                     self.say_filler()
@@ -246,6 +249,8 @@ class Halo:
                     print("LLMで応答を生成中...")
                     system_memory = self.system_content + self.fake_memory_text
                     self.response = ""
+                    # 反応しないことがあるので再度パイプライン再生開始
+                    self.tts_pipelined.talk_resume()
                     for delta in self.llm.stream_generate_text(self.llm_model, user_text, system_memory, self.history):
                         if not delta:
                             continue
@@ -253,6 +258,7 @@ class Halo:
                         print(f"[response] {self.response}")
                         # 逐次テキスト断片をパイプラインへ投入
                         self.tts_pipelined.push_text(delta)
+                        print(f"is_object_playing(会話中のはず): {self.tts_pipelined.is_object_playing()}")
                     '''
                     response_text = self.llm.generate_text(self.llm_model, user_text, system_memory, self.history)
                     self.response = response_text
@@ -304,6 +310,7 @@ class Halo:
                         if keyword_filler != "":
                             print(f"[keyword_filler] {keyword_filler}")
                             self.tts_pipelined.push_text(keyword_filler)
+                            #self.tts_pipelined.barge_in(keyword_filler, mode="soft")
                     except Exception:
                         pass
                 threading.Thread(target=_task, daemon=True).start()

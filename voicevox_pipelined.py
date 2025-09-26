@@ -1,4 +1,4 @@
-# tts_pipelined_bargein_gate_flush.py
+# tts_pipelined_bargein_gate_flush_skip.py
 import wave
 import re
 import queue
@@ -28,6 +28,7 @@ class VoiceVoxTTSPipelined:
       - barge_in(mode="hard"|"soft") で話題を即切替（エポック方式）
       - 再生ゲート: autoplay=False で起動→ talk_resume() で任意開始、talk_pause() で一時停止
       - talk_pause_after_flush(): いまのバックログを全部話し終えたら一時停止
+      - skip_current(): 今の文だけ中断して次の文へ（軽量スキップ）
     """
 
     _SENT_END = re.compile(r"[。．！？!?]\s*$")  # 文末検出
@@ -103,6 +104,9 @@ class VoiceVoxTTSPipelined:
         self._pause_when_idle = False
         # 句点待ちの途中断片も含め、即座に一度すべてフラッシュしたい時の合図
         self._force_ingest_flush = False
+
+        # 現在文スキップ用
+        self._skip_event = threading.Event()
 
         # スレッド
         self._th_ingest: Optional[threading.Thread] = None
@@ -180,6 +184,17 @@ class VoiceVoxTTSPipelined:
         if flush_ingest:
             self._force_ingest_flush = True
 
+    def skip_current(self):
+        """
+        今再生中の文（または gate 待ちで“次に再生予定”の文）をスキップし、次の文へ進む。
+        - エポックは変えない／キューは捨てない
+        - 再生ゲートが閉じている場合は、“次に再生予定”の文を飛ばして待機する
+        """
+        self._skip_event.set()
+        with self._suppress_ex():
+            if self._play_obj:
+                self._play_obj.stop()  # 再生中なら即停止 → 次ループで次文へ
+
     def push_text(self, text: str):
         if not text:
             return
@@ -226,6 +241,15 @@ class VoiceVoxTTSPipelined:
             return False
         if self._is_speaking:
             return True
+        if self._play_obj is not None:
+            try:
+                return self._play_obj.is_playing()
+            except Exception:
+                return False
+        return False
+
+    def is_object_playing(self) -> bool:
+        """現在読み上げ（合成/再生）中かどうか。"""
         if self._play_obj is not None:
             try:
                 return self._play_obj.is_playing()
@@ -411,11 +435,41 @@ class VoiceVoxTTSPipelined:
                         if self._stop_event.is_set():
                             return
 
-                # ★ 再生ゲート：開くまで待つ（stop にも反応）
+                # --- 再生前スキップ（ここで指示が出ていればこの文を飛ばす） ---
+                if self._skip_event.is_set():
+                    self._skip_event.clear()
+                    self._next_seq += 1
+                    # soft-barge-in が保留なら「言い切った扱い」で即切替
+                    with self._results_cv:
+                        if self._flush_after_current:
+                            self._flush_after_current = False
+                            self._results.pop(self._player_epoch, None)
+                            self._player_epoch = self._epoch
+                            self._next_seq = 0
+                            self._results_cv.notify_all()
+                    continue
+
+                # ★ 再生ゲート：開くまで待つ（stop/skip にも反応）
+                skipped_before_play = False
                 while not self._stop_event.is_set() and not self._play_gate.is_set():
+                    # ゲート待ちの間にスキップ要求が来たら、この文を飛ばす
+                    if self._skip_event.is_set():
+                        self._skip_event.clear()
+                        skipped_before_play = True
+                        break
                     time.sleep(0.02)
                 if self._stop_event.is_set():
                     return
+                if skipped_before_play:
+                    self._next_seq += 1
+                    with self._results_cv:
+                        if self._flush_after_current:
+                            self._flush_after_current = False
+                            self._results.pop(self._player_epoch, None)
+                            self._player_epoch = self._epoch
+                            self._next_seq = 0
+                            self._results_cv.notify_all()
+                    continue
 
                 # 再生
                 self._play(wav_bytes)
@@ -427,6 +481,10 @@ class VoiceVoxTTSPipelined:
                 # 文ごとに待つと自然
                 if self._play_obj:
                     self._play_obj.wait_done()
+
+                # 再生中に skip_current() が来て stop 済みの場合の掃除
+                if self._skip_event.is_set():
+                    self._skip_event.clear()
 
                 # 次の文へ
                 self._next_seq += 1
@@ -552,39 +610,31 @@ class VoiceVoxTTSPipelined:
 # ---- 使い方サンプル ----
 if __name__ == "__main__":
     import time
+    
 
     motor = MotorController()
     tts = VoiceVoxTTSPipelined(base_url="http://127.0.0.1:50021", speaker=89, max_len=80)
     tts.set_params(speedScale=1.0, pitchScale=0.0, intonationScale=1.0)
 
-    # 自動再生オフで起動（まずは溜める）
-    tts.start_stream(motor_controller=motor, synth_workers=2, autoplay=False)
+    tts.start_stream(motor_controller=motor, synth_workers=2, autoplay=True)
 
-    tts.push_text("このメッセージは、まだ話しません。")
-    tts.push_text("任意のタイミングで話し始めます。")
+    tts.push_text("一文目です。")
+    tts.push_text("二文目です。")
+    tts.push_text("三文目です。")
 
-    # 何か他の処理……
-    time.sleep(1.0)
+    time.sleep(0.3)        # 1文目の途中で
+    tts.skip_current()     # 1文目を中断 → 2文目へ
 
-    # ここで話し始める
-    tts.talk_resume()
+    # ゲートを閉じて“次の文”を待機状態に
+    tts.talk_pause()
+    tts.push_text("四文目です。（ゲート閉じているのでまだ鳴らない）")
+    time.sleep(0.5)
+    tts.skip_current()     # 次に鳴る予定の文（四文目）をスキップ
+    tts.talk_resume()      # 再開 → 五文目以降があればそこから鳴る
 
-    # いくつか追加
-    tts.push_text("このあと、バックログを全部話し終えたら止まります。")
-    tts.push_text("これもバックログに入ります。")
-
-    # 「今ある分を全部話し切ったら pause」させる（句点待ちの途中も一気に文にする）
+    # バックログを全部吐いて止める
     tts.talk_pause_after_flush(flush_ingest=True)
-
-    # 本当に止まるまで待ってみる（任意）
-    time.sleep(2.0)
-
-    # 再開
-    tts.talk_resume()
-    tts.push_text("再開しました。以上でデモを終わります。")
 
     tts.close_stream()
     tts.wait_until_idle()
     tts.shutdown()
-
-
