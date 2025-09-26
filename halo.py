@@ -294,7 +294,7 @@ class Halo:
         except Exception:
             pass
 
-    def speak_async(self, text: str) -> None:
+    def speak_async(self, text: str) -> VoiceVoxTTS:
         # 進行中があれば停止
         with self.tts_lock:
             self.stop_tts()
@@ -317,6 +317,7 @@ class Halo:
 
             self.tts_thread = threading.Thread(target=_run, daemon=True)
             self.tts_thread.start()
+        return self.tts
 
     #---------- keyword filler用tts  ----------
     '''
