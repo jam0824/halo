@@ -80,7 +80,7 @@ class Halo:
 
         self.tts_pipelined = VoiceVoxTTSPipelined(base_url="http://192.168.1.151:50021", speaker=89, max_len=80)
         self.tts_pipelined.set_params(speedScale=1.0, pitchScale=0.0, intonationScale=1.0)
-        self.tts_pipelined.start_stream(motor_controller=self.motor_controller, synth_workers=2, autoplay=False)
+        self.tts_pipelined.start_stream(motor_controller=self.motor_controller, synth_workers=3, autoplay=False)
 
         
         # ウォームアップ
@@ -208,9 +208,6 @@ class Halo:
                         time.sleep(0.1)
                         continue
 
-                    # パイプライン再生終了
-                    self.tts_pipelined.talk_pause_after_flush(flush_ingest=True)
-
                     # ユーザー発話認識(キーワード取得)
                     user_text = self.listen_with_nouns()
                     if not user_text or user_text == "":
@@ -259,6 +256,9 @@ class Halo:
                         # 逐次テキスト断片をパイプラインへ投入
                         self.tts_pipelined.push_text(delta)
                         print(f"is_object_playing(会話中のはず): {self.tts_pipelined.is_object_playing()}")
+
+                    # パイプライン再生終了
+                    self.tts_pipelined.talk_pause_after_flush(flush_ingest=True)
                     '''
                     response_text = self.llm.generate_text(self.llm_model, user_text, system_memory, self.history)
                     self.response = response_text
