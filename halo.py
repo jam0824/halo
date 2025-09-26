@@ -80,7 +80,7 @@ class Halo:
 
         self.tts_pipelined = VoiceVoxTTSPipelined(base_url="http://192.168.1.151:50021", speaker=89, max_len=80)
         self.tts_pipelined.set_params(speedScale=1.0, pitchScale=0.0, intonationScale=1.0)
-        self.tts_pipelined.start_stream(motor_controller=self.motor_controller, synth_workers=2)
+        self.tts_pipelined.start_stream(motor_controller=self.motor_controller, synth_workers=2, autoplay=False)
 
         
         # ウォームアップ
@@ -200,6 +200,7 @@ class Halo:
                     if time.time() >= time_out:
                         print(f"タイムアウト({self.run_timeout_sec}s)により終了します。")
                         break
+
                     # VADで発話を検出
                     if not self.is_vad(
                         self.config, 
@@ -207,6 +208,10 @@ class Halo:
                         time.sleep(0.1)
                         continue
 
+                    # パイプライン再生終了
+                    self.tts_pipelined.talk_pause_after_flush(flush_ingest=True)
+
+                    # ユーザー発話認識(キーワード取得)
                     user_text = self.listen_with_nouns()
                     if not user_text or user_text == "":
                         time.sleep(0.1)
@@ -221,6 +226,9 @@ class Halo:
                     # 文章のチェックして、正しいユーザー発話ではない場合はcontinue
                     if self.check_sentence(user_text, self.response):
                         continue
+                    # パイプライン再生開始
+                    self.tts_pipelined.talk_resume()
+
                     # フィラー再生
                     self.say_filler()
 
