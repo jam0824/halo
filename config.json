@@ -17,7 +17,7 @@
     "intonationScale": 1.0
   },
   "filler":{
-    "use_filler": false,
+    "use_filler": true,
     "filler_dir": "./filler"
   },
   "led":{
