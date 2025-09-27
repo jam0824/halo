@@ -176,10 +176,15 @@ class JapaneseNounExtractor:
             })
         return list_tokens
         
-    async def make_keyword_filler_async(self, text: str) -> str:
+    async def make_keyword_filler_async(self, text: str, your_name: str) -> str:
         nouns = await asyncio.to_thread(self.extract, text)
-        print(nouns)
-        if nouns != [] and not self.is_speak_filler:
+        # your_name を除外
+        try:
+            listNouns = [n for n in nouns if your_name not in n]
+        except Exception:
+            listNouns = nouns
+        print(listNouns)
+        if listNouns != [] and not self.is_speak_filler:
             self.count += 1
             if self.count >= 2:
                 self.is_speak_filler = True
@@ -189,7 +194,7 @@ class JapaneseNounExtractor:
                 list_main = kw.get("keyword_filler", [])
                 list_add = kw.get("keyword_filler_add", [])
 
-                return_message = random.choice(list_main).format(keyword=nouns[0])
+                return_message = random.choice(list_main).format(keyword=listNouns[0], your_name=your_name)
                 #return_message += random.choice(list_add).format(keyword=nouns[0])
                 return return_message
         return ""

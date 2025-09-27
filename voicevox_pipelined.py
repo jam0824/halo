@@ -10,6 +10,8 @@ from typing import Dict, Optional
 import requests
 import simpleaudio as sa
 
+from helper.filler import Filler
+
 # 実機では本物の MotorController を使ってください
 try:
     from motor_controller import MotorController
