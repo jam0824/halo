@@ -27,7 +27,7 @@ class LLM:
         4o-mini の出力をストリーミングで1トークン(または断片)ずつ yield する。
         """
         resp = self.client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=default_model,
             messages=[
                 {"role": "system", "content": system_content},
                 {"role": "assistant", "content": assistant_content},
