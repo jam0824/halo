@@ -92,6 +92,8 @@ class VoiceVoxTTSPipelined:
         self._seq_counter = 0           # 現エポックで新規付与する seq
         self._next_seq = 0              # プレーヤが次に欲しい seq
         self._flush_after_current = False  # soft 割り込み用：現行文の直後に一掃・切替
+        self._synth_inflight = 0
+        self._synth_inflight_lock = threading.Lock()
 
         # 合成結果（epoch ごとに {seq: wav_bytes}）
         self._results: Dict[int, Dict[int, bytes]] = {}
@@ -115,6 +117,8 @@ class VoiceVoxTTSPipelined:
 
         # HTTPセッション（接続再利用で微速化）
         self._http = requests.Session()
+
+        
 
     # ---------- Public API ----------
     def set_params(self, **kwargs):
@@ -384,25 +388,32 @@ class VoiceVoxTTSPipelined:
                         break
                     continue
 
-                # 合成（簡易リトライ 1 回）
-                query = self._audio_query(sent, self.speaker)
-                query.update(self.params)
-                wav_bytes = self._synth(query, self.speaker)
+                with self._synth_inflight_lock:
+                    self._synth_inflight += 1
 
-                # AEC等：far-endへ16k/monoで供給（任意）
-                if self._corr_gate is not None:
-                    with self._suppress_ex():
-                        pcm = self._wav_to_int16_mono16k(wav_bytes)
-                        self._corr_gate.publish_farend(pcm)
+                try:
+                    # 合成（簡易リトライ 1 回）
+                    query = self._audio_query(sent, self.speaker)
+                    query.update(self.params)
+                    wav_bytes = self._synth(query, self.speaker)
 
-                # 結果を登録（保存直前に epoch を確認）
-                with self._results_cv:
-                    # hard 割り込みで player_epoch が進んでいたら旧世代は破棄
-                    if epoch < self._player_epoch:
-                        continue
-                    bucket = self._results.setdefault(epoch, {})
-                    bucket[seq] = wav_bytes
-                    self._results_cv.notify_all()
+                    # AEC等：far-endへ16k/monoで供給（任意）
+                    if self._corr_gate is not None:
+                        with self._suppress_ex():
+                            pcm = self._wav_to_int16_mono16k(wav_bytes)
+                            self._corr_gate.publish_farend(pcm)
+
+                    # 結果を登録（保存直前に epoch を確認）
+                    with self._results_cv:
+                        # hard 割り込みで player_epoch が進んでいたら旧世代は破棄
+                        if epoch < self._player_epoch:
+                            continue
+                        bucket = self._results.setdefault(epoch, {})
+                        bucket[seq] = wav_bytes
+                        self._results_cv.notify_all()
+                finally:
+                    with self._synth_inflight_lock:
+                        self._synth_inflight -= 1
 
             except Exception:
                 if self._stop_event.is_set():
@@ -585,10 +596,12 @@ class VoiceVoxTTSPipelined:
         return pcm
 
     def _is_idle_now(self) -> bool:
-        """合成結果・文キュー・入力キューに何も残っていない＝“いま空”なら True"""
         with self._results_cv:
             pending_results = any(bucket for bucket in self._results.values())
-        return (self._in_q.empty() and self._sent_q.empty() and not pending_results)
+        with self._synth_inflight_lock:
+            inflight = self._synth_inflight
+        return (self._in_q.empty() and self._sent_q.empty()
+                and not pending_results and inflight == 0)
 
     @staticmethod
     def _drain_queue(q: "queue.Queue"):

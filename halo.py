@@ -309,6 +309,8 @@ class Halo:
                         keyword_filler = asyncio.run(self.janome.make_keyword_filler_async(txt))
                         if keyword_filler != "":
                             print(f"[keyword_filler] {keyword_filler}")
+                            if self.tts_pipelined.is_object_playing():
+                                self.tts_pipelined.barge_in("バージイン", mode="hard")
                             self.tts_pipelined.push_text(keyword_filler)
                             #self.tts_pipelined.barge_in(keyword_filler, mode="soft")
                     except Exception:
