@@ -246,8 +246,6 @@ class Halo:
                     print("LLMで応答を生成中...")
                     system_memory = self.system_content + self.fake_memory_text
                     self.response = ""
-                    # 反応しないことがあるので再度パイプライン再生開始
-                    self.tts_pipelined.talk_resume()
                     for delta in self.llm.stream_generate_text(self.llm_model, user_text, system_memory, self.history):
                         if not delta:
                             continue
