@@ -69,10 +69,12 @@ class VoiceVoxTTS:
         text: str, 
         motor_controller: MotorController, 
         corr_gate=None, 
-        filler=None):
+        filler=None,
+        filler_tts=None):
         """
         同期実行：合成＆再生を行い、完了（または stop()）まで戻らない。
         """
+        self.filler_tts = filler_tts
         self.motor_controller = motor_controller
         self._stop_event.clear()
         self._is_speaking = True
@@ -206,6 +208,9 @@ class VoiceVoxTTS:
             wav = sa.WaveObject.from_wave_read(wf)
         if self.filler is not None:
             self.filler.stop_filler()
+        if self.filler_tts is not None:
+            if self.filler_tts.is_playing():
+                self.filler_tts.stop()
         self.motor_controller.led_start_blink()
         self.motor_controller.motor_tilt_kyoro_kyoro(2)
         self._play_obj = wav.play()

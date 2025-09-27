@@ -2,6 +2,7 @@ import re
 import json
 import urllib.request
 import threading
+import asyncio
 import time
 from typing import Optional, Union
 
@@ -19,6 +20,8 @@ from helper.vad import VAD
 from helper.similarity import TextSimilarity
 from halo_mcp.spotify_refresh import SpotifyRefresh
 from motor_controller import MotorController
+from halo_janome import JapaneseNounExtractor
+from voicevox_pipelined import VoiceVoxTTSPipelined
 
 class Halo:
     def __init__(self):
@@ -53,6 +56,7 @@ class Halo:
         self.filler = Filler(self.isfiller, self.filler_dir)
         self.system_content = self.halo_helper.load_system_prompt_and_replace(self.owner_name, self.your_name)
         print(self.system_content)
+        self.janome = JapaneseNounExtractor()
 
         # 常時STT運用用の状態
         self.history: str = ""
@@ -61,6 +65,8 @@ class Halo:
         # TTSをバックグラウンドで回すためのスレッド管理
         self.tts_thread: Optional[threading.Thread] = None
         self.tts_lock = threading.Lock()
+        self.tts_filler_thread: Optional[threading.Thread] = None
+        self.tts_filler_lock = threading.Lock()
         # STT安定化用カウンタ
         self._stt_fail_count: int = 0
         # fake_memory用
@@ -69,7 +75,12 @@ class Halo:
         
         self.corr_gate = self.init_corr_gate(self.config.get("vad", {}))
         self.tts = self.init_tts(self.tts_config)
+        self.tts_filler = self.init_tts(self.tts_config)
         self.init_spotify()
+
+        self.tts_pipelined = VoiceVoxTTSPipelined(base_url="http://192.168.1.151:50021", speaker=89, max_len=80)
+        self.tts_pipelined.set_params(speedScale=1.0, pitchScale=0.0, intonationScale=1.0)
+        self.tts_pipelined.start_stream(motor_controller=self.motor_controller, corr_gate=self.corr_gate, synth_workers=3, autoplay=False)
 
         
         # ウォームアップ
@@ -189,6 +200,7 @@ class Halo:
                     if time.time() >= time_out:
                         print(f"タイムアウト({self.run_timeout_sec}s)により終了します。")
                         break
+
                     # VADで発話を検出
                     if not self.is_vad(
                         self.config, 
@@ -196,7 +208,8 @@ class Halo:
                         time.sleep(0.1)
                         continue
 
-                    user_text = self.stt.listen_once_fast(motor_controller=self.motor_controller)
+                    # ユーザー発話認識(キーワード取得)
+                    user_text = self.listen_with_nouns()
                     if not user_text or user_text == "":
                         time.sleep(0.1)
                         continue
@@ -210,6 +223,12 @@ class Halo:
                     # 文章のチェックして、正しいユーザー発話ではない場合はcontinue
                     if self.check_sentence(user_text, self.response):
                         continue
+                    print(f"is_playing(話してないはず): {self.tts_pipelined.is_object_playing()}")
+
+                    # パイプライン再生開始
+                    self.tts_pipelined.talk_resume()
+                    # もし会話が走っていたら、その会話はスキップ
+
                     # フィラー再生
                     self.say_filler()
 
@@ -226,7 +245,21 @@ class Halo:
 
                     print("LLMで応答を生成中...")
                     system_memory = self.system_content + self.fake_memory_text
+                    self.response = ""
+                    for delta in self.llm.stream_generate_text(self.llm_model, user_text, system_memory, self.history):
+                        if not delta:
+                            continue
+                        self.response += delta
+                        print(f"[response] {self.response}")
+                        # 逐次テキスト断片をパイプラインへ投入
+                        self.tts_pipelined.push_text(delta)
+                        print(f"is_object_playing(会話中のはず): {self.tts_pipelined.is_object_playing()}")
+
+                    # パイプライン再生終了
+                    self.tts_pipelined.talk_pause_after_flush(flush_ingest=False)
+                    '''
                     response_text = self.llm.generate_text(self.llm_model, user_text, system_memory, self.history)
+                    self.response = response_text
                     self.response, self.command = self.halo_helper.get_halo_response(response_text)
                     self.history = self.halo_helper.append_history(self.history, self.your_name, self.response)
                     # コマンドがあれば実行
@@ -234,7 +267,9 @@ class Halo:
                     
 
                     # 応答読み上げは非同期で行う
-                    self.speak_async(self.response)
+                    #self.speak_async(self.response)
+                    self.tts_pipelined.push_text(self.response)
+                    '''
                     time_out = time.time() + self.run_timeout_sec    # タイムアウト時間を更新
 
                 except KeyboardInterrupt:
@@ -259,6 +294,30 @@ class Halo:
             except Exception:
                 pass
 
+    # ---------- stt ----------
+    def listen_with_nouns(self) -> str:
+        self.janome.reset_keyword_filler()
+        # 途中結果の出力用ハンドラ
+        def _on_interim(txt: str):
+            try:
+                print(f"[interim] {txt}")
+                def _task():
+                    try:
+                        # 普通名詞・固有名詞でフィラーを生成
+                        keyword_filler = asyncio.run(self.janome.make_keyword_filler_async(txt))
+                        if keyword_filler != "":
+                            print(f"[keyword_filler] {keyword_filler}")
+                            if self.tts_pipelined.is_object_playing():
+                                self.tts_pipelined.barge_in("バージイン", mode="hard_nonstop_wav") #バージンは初回言わないバグがあるための対応
+                            self.tts_pipelined.push_text(keyword_filler)
+                    except Exception:
+                        pass
+                threading.Thread(target=_task, daemon=True).start()
+            except Exception:
+                pass
+        user_text = self.stt.listen_once_fast(motor_controller=self.motor_controller, on_interim=_on_interim)
+        return user_text
+
     # ---------- tts control ----------
     def stop_tts(self) -> None:
         try:
@@ -266,7 +325,7 @@ class Halo:
         except Exception:
             pass
 
-    def speak_async(self, text: str) -> None:
+    def speak_async(self, text: str) -> VoiceVoxTTS:
         # 進行中があれば停止
         with self.tts_lock:
             self.stop_tts()
@@ -283,12 +342,49 @@ class Halo:
             def _run():
                 try:
                     self.motor_controller.motor_pan_kyoro_kyoro(1, 2)
-                    self.tts.speak(text, self.motor_controller, corr_gate=self.corr_gate, filler=self.filler)
+                    self.tts.speak(text, self.motor_controller, corr_gate=self.corr_gate, filler=self.filler, filler_tts=self.tts_filler)
                 except Exception as e:
                     print(f"TTSエラー: {e}")
 
             self.tts_thread = threading.Thread(target=_run, daemon=True)
             self.tts_thread.start()
+        return self.tts
+
+    #---------- keyword filler用tts  ----------
+    '''
+    本会話の読み上げ直前(_play時)に発話を停止させたかったが
+    同一メソッドを使うのは上手くいかなかったため別メソッドで対応。
+    良いやり方があれば修正
+    '''
+    def stop_filler_tts(self) -> None:
+        try:
+            self.tts_filler.stop()
+        except Exception:
+            pass
+
+    def speak_filler_async(self, text: str) -> None:
+        # 進行中があれば停止
+        with self.tts_filler_lock:
+            self.stop_filler_tts()
+            self.motor_controller.led_stop_blink()
+            self.motor_controller.stop_motor()
+            # 再生停止の完了を待つ（短時間）
+            try:
+                # まずはスレッドの終了を待機
+                if self.tts_filler_thread and self.tts_filler_thread.is_alive():
+                    self.tts_filler_thread.join(timeout=1.0)
+            except Exception as e:
+                print(f"TTSスレッド終了エラー: {e}")
+            
+            def _run():
+                try:
+                    self.motor_controller.motor_pan_kyoro_kyoro(1, 2)
+                    self.tts_filler.speak(text, self.motor_controller, corr_gate=self.corr_gate, filler=self.filler)
+                except Exception as e:
+                    print(f"TTSエラー: {e}")
+
+            self.tts_filler_thread = threading.Thread(target=_run, daemon=True)
+            self.tts_filler_thread.start()
     # ---------- コマンド実行 ----------
     def exec_command(self, command: str) -> str:
         if self.command == "":
@@ -339,9 +435,11 @@ class Halo:
         if self.is_similarity_threshold(user_text, response):
             print(f"類似度がしきい値を超えています :txt: {user_text} :response: {response}")
             return True
+        """
         if self.is_coherence_threshold(user_text, self.coherence_threshold):
             print(f"破綻がしきい値を超えています :txt: {user_text} :threshold: {self.coherence_threshold}")
             return True
+        """
         return False
 
     def say_filler(self) -> bool:
@@ -385,6 +483,8 @@ class Halo:
             return GoogleSpeechToText()
         else:
             raise ValueError(f"Invalid STT type: {stt_type}")
+
+    
 
 if __name__ == "__main__":
     halo = Halo()
