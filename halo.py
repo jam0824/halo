@@ -198,6 +198,8 @@ class Halo:
                     if time.time() >= time_out:
                         print(f"タイムアウト({self.run_timeout_sec}s)により終了します。")
                         break
+                    
+                    self.stop_led()
 
                     # VADで発話を検出
                     if not self.is_vad(
@@ -253,6 +255,7 @@ class Halo:
                         # 逐次テキスト断片をパイプラインへ投入
                         self.tts_pipelined.push_text(delta)
 
+                    self.motor_controller.motor_pan_kyoro_kyoro(1, 2)
                     # パイプライン再生終了
                     self.tts_pipelined.talk_pause_after_flush(flush_ingest=False)
                     
@@ -349,6 +352,12 @@ class Halo:
             self.tts_thread = threading.Thread(target=_run, daemon=True)
             self.tts_thread.start()
         return self.tts
+
+    # ----------メカ------------------
+    def stop_led(self):
+        """パイプライン再生が終了したらled停止"""
+        if not self.tts_pipelined.is_object_playing():
+            self.motor_controller.led_stop_blink() #led停止
 
     # ---------- コマンド実行 ----------
     def exec_command(self, command: str) -> str:
