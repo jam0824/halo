@@ -258,7 +258,7 @@ class Halo:
                         print(f"is_object_playing(会話中のはず): {self.tts_pipelined.is_object_playing()}")
 
                     # パイプライン再生終了
-                    self.tts_pipelined.talk_pause_after_flush(flush_ingest=True)
+                    self.tts_pipelined.talk_pause_after_flush(flush_ingest=False)
                     '''
                     response_text = self.llm.generate_text(self.llm_model, user_text, system_memory, self.history)
                     self.response = response_text
