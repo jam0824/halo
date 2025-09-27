@@ -131,6 +131,50 @@ class JapaneseNounExtractor:
             if surface:
                 results.append(surface)
         return results
+    
+    def pos_all(self, text: str) -> List[dict]:
+        """
+        与えられた文章を形態素解析し、各トークンの品詞情報を配列で返します。
+        戻り値の各要素は辞書で、少なくとも以下のキーを含みます。
+          - surface: 表層形
+          - base: 見出し語/基本形（取得不可の場合は表層形）
+          - pos: 品詞情報（配列）
+        可能なら読みや正規化形なども含めます。
+        """
+        if not text:
+            return []
+        if self.engine == 'janome':
+            return self._pos_all_janome(text)
+        return self._pos_all_sudachi(text)
+
+    # --- 内部実装: 品詞一覧出力 (Janome) ---
+    def _pos_all_janome(self, text: str) -> List[dict]:
+        list_tokens: List[dict] = []
+        for t in self._tokenizer.tokenize(text):
+            pos_list = t.part_of_speech.split(',') if t.part_of_speech else []
+            base = t.base_form if getattr(t, 'base_form', '*') != '*' else t.surface
+            list_tokens.append({
+                'surface': t.surface,
+                'base': base,
+                'pos': pos_list,
+                'reading': getattr(t, 'reading', None),
+                'phonetic': getattr(t, 'phonetic', None),
+            })
+        return list_tokens
+
+    # --- 内部実装: 品詞一覧出力 (Sudachi) ---
+    def _pos_all_sudachi(self, text: str) -> List[dict]:
+        list_tokens: List[dict] = []
+        for m in self._tokenizer.tokenize(text, self._mode):
+            pos_tuple = m.part_of_speech() or ()
+            list_tokens.append({
+                'surface': m.surface(),
+                'base': m.dictionary_form(),
+                'normalized': m.normalized_form(),
+                'pos': list(pos_tuple),
+                'reading': m.reading_form(),
+            })
+        return list_tokens
         
     async def make_keyword_filler_async(self, text: str) -> str:
         nouns = await asyncio.to_thread(self.extract, text)
@@ -165,6 +209,9 @@ if __name__ == "__main__":
     extractor = JapaneseNounExtractor(engine="janome", normalize=True, unique=True)
     print(extractor.extract(text))
     # 例）['昨日', '東京', 'スカイツリー', 'イベント', '任天堂', '新作', 'ゲーム', '話題']
+
+    text = "好きな人は誰"
+    print(extractor.pos_all(text))
 
     # SudachiPy を使う場合
     # extractor2 = JapaneseNounExtractor(engine="sudachi", normalize=True, unique=False)
