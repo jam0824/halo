@@ -3,12 +3,15 @@
 Halo は、音声認識(STT)・大規模言語モデル(LLM)・音声合成(TTS)・デバイス制御(LED/サーボ)を組み合わせた対話型アシスタントです。Raspberry Pi 5 に最適化し、TTSループバック抑制やVADを備えています。
 
 ### 主な機能
-- **STT**: Azure Cognitive Services または Google Cloud Speech-to-Text（単発認識）
-- **LLM**: OpenAI Chat Completions API
-- **TTS**: VOICEVOX エンジンにより文単位で合成・即時再生
-- **ループバック抑制**: 相関ゲート(`helper/corr_gate.py`)でTTS由来音をSTTから除外
+- **STT**: Azure Cognitive Services / Google Cloud Speech-to-Text（単発・ストリーミング）
+- **LLM**: OpenAI Chat Completions（同期）/ ストリーミング出力に対応
+- **TTS**: 
+  - シンプル版 `voicevox.py`: 文単位で合成→即時再生
+  - パイプライン版 `voicevox_pipelined.py`: 断片を文に整形→並列合成→順序再生、barge-in/ゲート制御
+- **ループバック抑制**: 相関ゲート(`helper/corr_gate.py`)でTTS由来音をSTTから除外（pipelined版にも対応）
 - **VAD**: WebRTC VAD による発話検出(`helper/vad.py`)
 - **LED/Motor**: Pi 5 対応。LEDは gpiozero、サーボはハードウェアPWM(`rpi-hardware-pwm`)で低ジッター制御
+- **キーワードフィラー**: Janome/Sudachiで名詞抽出→`keyword_filler.json`のテンプレから短い相槌を自動生成
 
 ## 動作要件
 - Python 3.9+（推奨: 3.11）
@@ -48,6 +51,10 @@ pip install -r requirements.txt
 export GPIOZERO_PIN_FACTORY=lgpio
 ```
 
+日本語形態素解析（任意）:
+- Janome: `pip install janome`
+- Sudachi: `pip install sudachipy sudachidict-core`
+
 ### 3) API/サービスの設定
 - OpenAI: 環境変数 `OPENAI_API_KEY`
 - Azure STT を使う場合: `SPEECH_KEY`, `SPEECH_REGION`
@@ -64,6 +71,7 @@ export GOOGLE_APPLICATION_CREDENTIALS="/path/to/sa.json"
 
 ### 4) VOICEVOX エンジン
 - VOICEVOXエンジンを起動（例: `http://127.0.0.1:50021`）
+- パイプラインTTSは起動時に`start_stream()`し、`push_text()`で随時投入します
 
 ## 設定ファイル
 `config.json` で挙動を調整します（例）。
@@ -102,12 +110,26 @@ export GOOGLE_APPLICATION_CREDENTIALS="/path/to/sa.json"
 }
 ```
 
+### キーワードフィラー設定
+- `keyword_filler.json` で相槌テンプレートを管理（結合せず辞書構造のまま）
+```json
+{
+  "keyword": {
+    "keyword_filler": ["ハロ、{keyword}気になる！", "なるほど、{keyword}ね！"],
+    "keyword_filler_add": ["ハロ、なるほど。", "ハロ、いいね。"]
+  }
+}
+```
+- Janomeユーザー辞書（任意）: `janome_dictionary/user_dictionary.csv` を配置し、`Tokenizer(udic=..., udic_enc="utf8")`で使用
+
 ## 実行方法
 ```bash
 source halo/bin/activate
 python halo.py
 ```
 - 単発会話モードで、VADが話し始めを検出→STT→LLM→TTSの順に動作します。
+- LLMストリーミング時は、生成断片を逐次 `VoiceVoxTTSPipelined.push_text()` に流し込みます。
+- 再生制御: `talk_resume()`, `talk_pause_after_flush()`, 割り込み `barge_in(text, mode="hard|soft")`
 
 ## 主要ファイル
 - `halo.py`: メインアプリ本体
@@ -117,10 +139,13 @@ python halo.py
 - `helper/similarity.py`: 類似度計算（ハウリング検知に近い用途）
 - `helper/asr_coherence.py`: 認識文の整合性スコア（しきい値でフィルタ）
 - `voicevox.py`: VOICEVOX TTS 制御
+- `voicevox_pipelined.py`: ストリーミング断片→文整形→並列合成→順序再生、barge-in/ゲート対応
 - `function_led.py`: gpiozero によるLED制御
 - `function_motor.py`: ハードウェアPWMによるサーボ制御（低ジッター）
 - `stt_azure.py`, `stt_google.py`: 単発認識（listen_once）
 - `llm.py`: OpenAI Chat Completions クライアント
+- `halo_janome.py`: 名詞抽出・キーワードフィラー生成・品詞一覧(`pos_all`)ユーティリティ
+- `keyword_filler.json`: 相槌テンプレ定義（辞書構造）
 
 ## サーボ制御メモ（Raspberry Pi 5）
 - PWM対応ピン: `GPIO18/19`
@@ -137,6 +162,7 @@ python halo.py
 - `Cannot determine SOC peripheral base address`: RPi.GPIO バックエンドにフォールバックしている→ `python3-rpi-lgpio` を導入し `GPIOZERO_PIN_FACTORY=lgpio`
 - pigpio は不要（Pi 5 では未対応版が多く、デーモン起動は使いません）
 - 麦音（ループバック）を拾う: `helper/corr_gate.py` によりTTS PCMをpublishしておくこと。`halo.py`ではTTSに `self.corr_gate` を渡しています
+ - VOICEVOXが重い: `voicevox_pipelined.py` の `synth_workers` を1〜2に下げる、`max_len` を短くする
 
 ## ライセンス
 個人利用・研究目的での使用を想定しています。各サービスの利用規約/ライセンスに従ってください。
