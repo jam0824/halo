@@ -64,7 +64,7 @@ class VAD:
                         if corr_gate is not None:
                             try:
                                 if corr_gate.is_tts_like(frame_i16):
-                                    # print("TTS由来の音声と判断して無視します。")
+                                    print("TTS由来の音声と判断して無視します。")
                                     consecutive_speech = 0
                                     continue
                             except Exception:

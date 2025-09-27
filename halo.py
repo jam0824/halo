@@ -80,7 +80,7 @@ class Halo:
 
         self.tts_pipelined = VoiceVoxTTSPipelined(base_url="http://192.168.1.151:50021", speaker=89, max_len=80)
         self.tts_pipelined.set_params(speedScale=1.0, pitchScale=0.0, intonationScale=1.0)
-        self.tts_pipelined.start_stream(motor_controller=self.motor_controller, synth_workers=3, autoplay=False)
+        self.tts_pipelined.start_stream(motor_controller=self.motor_controller, corr_gate=self.corr_gate, synth_workers=3, autoplay=False)
 
         
         # ウォームアップ
