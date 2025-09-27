@@ -261,6 +261,12 @@ class VoiceVoxTTSPipelined:
                 return False
         return False
 
+    def stop_play_object(self):
+        """再生オブジェクトを停止"""
+        with self._suppress_ex():
+            if self._play_obj:
+                self._play_obj.stop()
+
     # --- 割り込み（barge-in） ---
     def barge_in(self, text: str, mode: str = "hard"):
         """
@@ -268,8 +274,9 @@ class VoiceVoxTTSPipelined:
                      最初の文は ingest をバイパスして sent_q に即投入。
                      （※再生ゲートが閉じていれば、再開するまでしゃべりません）
         mode="soft": 今の文を言い切ってから旧世代を一掃→新規世代へ切替。
+        mode="hard_nonstop_wav" : wav再生は止めないハードバージイン
         """
-        if mode not in ("hard", "soft"):
+        if mode not in ("hard", "soft", "hard_nonstop_wav"):
             mode = "hard"
 
         # 新しいエポックを開始
@@ -291,6 +298,20 @@ class VoiceVoxTTSPipelined:
                 if self._play_obj:
                     self._play_obj.stop()
 
+            # ingest のローカルバッファも確実に捨てる
+            self._reset_ingest_buf = True
+
+            # 再生側を新世代へ即切替
+            with self._results_cv:
+                self._player_epoch = self._epoch
+                self._next_seq = 0
+                self._flush_after_current = False
+                self._results_cv.notify_all()
+
+            # 最初の文は ingest を通さず sent_q に即投入（確実に先頭で再生させる）
+            self._push_sentence_immediate(text)
+
+        elif mode == "hard_nonstop_wav":
             # ingest のローカルバッファも確実に捨てる
             self._reset_ingest_buf = True
 

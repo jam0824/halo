@@ -308,9 +308,8 @@ class Halo:
                         if keyword_filler != "":
                             print(f"[keyword_filler] {keyword_filler}")
                             if self.tts_pipelined.is_object_playing():
-                                self.tts_pipelined.barge_in("バージイン", mode="hard")
+                                self.tts_pipelined.barge_in("バージイン", mode="hard_nonstop_wav") #バージンは初回言わないバグがあるための対応
                             self.tts_pipelined.push_text(keyword_filler)
-                            #self.tts_pipelined.barge_in(keyword_filler, mode="soft")
                     except Exception:
                         pass
                 threading.Thread(target=_task, daemon=True).start()
@@ -436,9 +435,11 @@ class Halo:
         if self.is_similarity_threshold(user_text, response):
             print(f"類似度がしきい値を超えています :txt: {user_text} :response: {response}")
             return True
+        """
         if self.is_coherence_threshold(user_text, self.coherence_threshold):
             print(f"破綻がしきい値を超えています :txt: {user_text} :threshold: {self.coherence_threshold}")
             return True
+        """
         return False
 
     def say_filler(self) -> bool:

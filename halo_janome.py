@@ -38,7 +38,8 @@ class JapaneseNounExtractor:
 
         if engine == 'janome':
             from janome.tokenizer import Tokenizer
-            self._tokenizer = Tokenizer()
+            udic_path = "./janome_dictionary/user_dictionary.csv"
+            self._tokenizer = Tokenizer(udic=udic_path, udic_enc="utf8")
         elif engine == 'sudachi':
             # SudachiPy は辞書が必要です。標準辞書: sudachidict-core
             from sudachipy import dictionary, tokenizer
@@ -47,17 +48,15 @@ class JapaneseNounExtractor:
         else:
             raise ValueError("engine must be 'janome' or 'sudachi'")
 
-    def load_keyword_templates(self, path: Optional[str] = None) -> List[str]:
+    def load_keyword_templates(self, path: Optional[str] = None):
         try:
             base_dir = os.path.dirname(__file__)
             json_path = path or os.path.join(base_dir, "keyword_filler.json")
             with open(json_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            list_templates = data.get("keyword_filler", [])
-            if not isinstance(list_templates, list):
-                list_templates = []
-            self.list_keyword_templates = list_templates
-            return list_templates
+            # そのまま辞書形式で保持・返却（結合しない）
+            self.list_keyword_templates = data
+            return data
         except Exception as e:
             try:
                 print(f"keyword_filler.json 読み込みエラー: {e}")
@@ -140,7 +139,15 @@ class JapaneseNounExtractor:
             self.count += 1
             if self.count >= 2:
                 self.is_speak_filler = True
-                return random.choice(self.list_keyword_templates).format(keyword=nouns[0])
+                # 辞書形式から個別リストを参照（結合しない）
+                obj = self.list_keyword_templates or {}
+                kw = obj.get("keyword", {}) if isinstance(obj, dict) else {}
+                list_main = kw.get("keyword_filler", [])
+                list_add = kw.get("keyword_filler_add", [])
+
+                return_message = random.choice(list_main).format(keyword=nouns[0])
+                #return_message += random.choice(list_add).format(keyword=nouns[0])
+                return return_message
         return ""
     def reset_keyword_filler(self) -> None:
         self.count = 0

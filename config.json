@@ -36,7 +36,7 @@
     "samplereate": 16000,
     "frame_duration_ms": 20,
     "waiting_min_consecutive_speech_frames": 12,
-    "min_consecutive_speech_frames": 4,
+    "min_consecutive_speech_frames": 2,
     "corr_threshold": 0.45,
     "max_lag_ms": 95,
     "cooldown_ms": 1000,
