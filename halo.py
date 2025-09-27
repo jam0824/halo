@@ -209,6 +209,7 @@ class Halo:
                         continue
 
                     self.is_need_wav_filler = True  #wav再生のフィラーをリセットしておく
+                    is_kaigyo = False  #改行が含まれているかどうか
 
                     # ユーザー発話認識(キーワード取得)
                     user_text = self.listen_with_nouns()
@@ -251,22 +252,32 @@ class Halo:
                         if not delta:
                             continue
                         self.response += delta
-                        print(f"[response] {self.response}")
-                        # 逐次テキスト断片をパイプラインへ投入
-                        self.tts_pipelined.push_text(delta)
 
+                        # 改行がきたらその時だけ流して、そのあとはパイプラインに流さない
+                        if "\n" in delta:
+                            is_kaigyo = True
+                            delta = delta.replace("\n", "")
+                            print(f"改行発生 : {delta}")
+                            self.tts_pipelined.push_text(delta)
+                        # 逐次テキスト断片をパイプラインへ投入
+                        if not is_kaigyo:
+                            self.tts_pipelined.push_text(delta)
+                        print(f"[response] {self.response}")
+
+                    # パイプライン再生中にpanを動かす
                     self.motor_controller.motor_pan_kyoro_kyoro(1, 2)
                     # パイプライン再生終了
                     self.tts_pipelined.talk_pause_after_flush(flush_ingest=False)
-                    
-                    '''
-                    response_text = self.llm.generate_text(self.llm_model, user_text, system_memory, self.history)
-                    self.response = response_text
-                    self.response, self.command = self.halo_helper.get_halo_response(response_text)
+
+                    # コマンドの取り出しと履歴追加
+                    self.response, self.command = self.halo_helper.get_halo_response(self.response)
                     self.history = self.halo_helper.append_history(self.history, self.your_name, self.response)
                     # コマンドがあれば実行
                     self.exec_command(self.command)
                     
+                    '''
+                    response_text = self.llm.generate_text(self.llm_model, user_text, system_memory, self.history)
+                    self.response = response_text
 
                     # 応答読み上げは非同期で行う
                     #self.speak_async(self.response)
