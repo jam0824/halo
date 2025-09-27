@@ -37,7 +37,7 @@ class VoiceVoxTTSPipelined:
 
     def __init__(
         self,
-        base_url: str = "http://127.0.0.1:50021",
+        base_url: str = "http://192.168.1.151:50021",
         speaker: int = 89,
         max_len: int = 80,
         queue_size_sent: int = 32,    # 文キューのサイズ

@@ -31,6 +31,7 @@ class Halo:
         self.owner_name: str = self.config["owner_name"]
         self.your_name: str = self.config["your_name"]
         self.run_timeout_sec: int = self.config["run_timeout_sec"]
+        self.stt_max_len: int = self.config["stt_max_len"]
         self.stt_type: str = self.config["stt"]
         self.llm_model: str = self.config["llm"]
         self.tts_config: dict = self.config["voiceVoxTTS"]
@@ -38,10 +39,8 @@ class Halo:
         self.isfiller: bool = self.config["filler"]["use_filler"]
         self.is_need_wav_filler = True  #wav再生のフィラーが必要かどうか
         self.filler_dir: str = self.config["filler"]["filler_dir"]
-        self.interrupt_word: str = self.config["interrupt_word"]
         self.coherence_threshold: float = self.config["coherence_threshold"]
 
-        self.interrupt_word_pattern = re.compile(self.interrupt_word)
         self.wakeup_word: str = self.config["wakeup_word"]
         self.wakeup_word_pattern = re.compile(self.wakeup_word)
         self.similarity_threshold: float = self.config["similarity_threshold"]
@@ -76,7 +75,7 @@ class Halo:
         self.tts = self.init_tts(self.tts_config)
         self.init_spotify()
 
-        self.tts_pipelined = VoiceVoxTTSPipelined(base_url="http://192.168.1.151:50021", speaker=89, max_len=80)
+        self.tts_pipelined = VoiceVoxTTSPipelined(base_url=self.tts_config["base_url"], speaker=89, max_len=80)
         self.tts_pipelined.set_params(speedScale=1.0, pitchScale=0.0, intonationScale=1.0)
         self.tts_pipelined.start_stream(motor_controller=self.motor_controller, corr_gate=self.corr_gate, filler=self.filler, synth_workers=3, autoplay=False)
         
@@ -417,6 +416,9 @@ class Halo:
         return False
 
     def check_sentence(self, user_text: str, response: str) -> bool:
+        if len(user_text) > self.stt_max_len:
+            print(f"ユーザー発話がしきい値を超えています :txt: {user_text} :threshold: {self.stt_max_len}")
+            return True
         if self.is_similarity_threshold(user_text, response):
             print(f"類似度がしきい値を超えています :txt: {user_text} :response: {response}")
             return True
@@ -428,7 +430,11 @@ class Halo:
         return False
 
     def say_filler(self, is_need_wav_filler: bool) -> bool:
+        # ttsフィラーだった時は再生しない
         if not is_need_wav_filler:
+            return False
+        # 音声再生中だった時は再生しない
+        if self.tts_pipelined.is_object_playing():
             return False
         if self.filler.say_filler():
             self.motor_controller.led_start_blink()
