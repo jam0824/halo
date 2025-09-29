@@ -1,6 +1,7 @@
 {
   "keyword":{
     "keyword_filler": [
+      "{your_name}ね{your_name}ね、{keyword}気になる！",
       "{your_name}、{keyword}気になる！",
       "{your_name}、{keyword}おもしろそう！",
       "おお、いいね！{keyword}か！",
