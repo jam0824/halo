@@ -4,22 +4,84 @@ from bleak import BleakClient
 ADDRESS = "69:96:1C:04:00:58"
 CHAR_UUID = "0000ffe1-0000-1000-8000-00805f9b34fb"  # Write/Notify対象
 
+
+class CarController:
+    def __init__(self, address: str, char_uuid: str):
+        self.address = address
+        self.char_uuid = char_uuid
+        self.client: BleakClient | None = None
+
+    async def connect(self):
+        """Connect to the BLE car"""
+        self.client = BleakClient(self.address)
+        await self.client.__aenter__()
+        print("Connected:", self.client.is_connected)
+
+        # 通知コールバックを登録
+        await self.client.start_notify(self.char_uuid, self._handle_rx)
+
+    async def disconnect(self):
+        """Disconnect from the BLE car"""
+        if self.client:
+            await self.client.stop_notify(self.char_uuid)
+            await self.client.__aexit__(None, None, None)
+            self.client = None
+            print("Disconnected")
+
+    async def _send(self, cmd: bytes):
+        """Send raw command to the car"""
+        if not self.client or not self.client.is_connected:
+            raise RuntimeError("Car is not connected")
+        await self.client.write_gatt_char(self.char_uuid, cmd)
+
+    # ==== Control Methods ====
+    async def forward(self):
+        await self._send(b"A#")
+
+    async def backward(self):
+        await self._send(b"B#")
+
+    async def left(self):
+        await self._send(b"C#")
+
+    async def right(self):
+        await self._send(b"D#")
+
+    async def stop(self):
+        await self._send(b"0#")
+
+    # ==== Receive Handler ====
+    def _handle_rx(self, _: int, data: bytearray):
+        """Parse and display incoming $DAT packets"""
+        try:
+            text = data.decode(errors="ignore").strip()
+            if text.startswith("$DAT") and text.endswith("#"):
+                payload = text[4:-1]  # 中身だけ抜き出す "23,101,78"
+                parts = payload.split(",")
+                if len(parts) == 3:
+                    distance, sound, battery = parts
+                    print(f"[DAT] Distance={distance} cm, Sound={sound}, Battery={battery}%")
+                else:
+                    print("RX (DAT malformed):", text)
+            else:
+                # その他の通知
+                print("RX:", text)
+        except Exception as e:
+            print("RX error:", e)
+
+
+# Example usage
 async def main():
-    async with BleakClient(ADDRESS) as client:
-        print("Connected:", client.is_connected)
+    car = CarController(ADDRESS, CHAR_UUID)
+    await car.connect()
 
-        # 車を前進させる
-        await client.write_gatt_char(CHAR_UUID, b"A#")
+    # 2秒前進 → 2秒停止してデータ受信
+    await car.forward()
+    await asyncio.sleep(2)
 
-        # 応答やセンサデータを受け取るコールバック
-        def handle_rx(_, data: bytearray):
-            print("RX:", data.decode(errors="ignore"))
+    await car.stop()
+    await asyncio.sleep(5)  # DATを数回受信して表示
 
-        await client.start_notify(CHAR_UUID, handle_rx)
-
-        # 10秒待ってみる
-        await asyncio.sleep(10)
-
-        await client.stop_notify(CHAR_UUID)
+    await car.disconnect()
 
 asyncio.run(main())
