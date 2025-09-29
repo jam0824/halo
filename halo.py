@@ -227,6 +227,7 @@ class Halo:
                         continue
 
                     # パイプライン再生開始
+                    self.tts_pipelined.stop_play_object() # 前回の話を止めて割り込む場合
                     self.tts_pipelined.talk_resume()
                     # もし会話が走っていたら、その会話はスキップ
 
