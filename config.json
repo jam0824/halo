@@ -48,5 +48,6 @@
     "get_fake_memory_days": 3
   },
   "similarity_threshold": 0.70,
-  "coherence_threshold": 0.10
+  "coherence_threshold": 0.10,
+  "random_action_time": 60
 }

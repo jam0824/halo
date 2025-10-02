@@ -22,6 +22,7 @@ from halo_mcp.spotify_refresh import SpotifyRefresh
 from motor_controller import MotorController
 from halo_janome import JapaneseNounExtractor
 from voicevox_pipelined import VoiceVoxTTSPipelined
+from random_action import RandomAction
 
 class Halo:
     def __init__(self):
@@ -57,6 +58,7 @@ class Halo:
         self.system_content = self.halo_helper.load_system_prompt_and_replace(self.owner_name, self.your_name)
         print(self.system_content)
         self.janome = JapaneseNounExtractor()
+        self.random_action = RandomAction(self.motor_controller, self.config)
 
         # 常時STT運用用の状態
         self.history: str = ""
@@ -171,7 +173,9 @@ class Halo:
         self.run()
         time.sleep(1)
         self.speak_async("ハロ、待機モード")
+        self.random_action.reset_timer()
         while True:
+            self.random_action.random_action(self.config["random_action_time"])
             if not self.is_vad(
                 self.config, 
                 self.config["vad"]["waiting_min_consecutive_speech_frames"]):
@@ -186,6 +190,7 @@ class Halo:
             self.run()
             time.sleep(1)
             self.speak_async("ハロ、待機モード")
+            self.random_action.reset_timer()
 
     def run(self) -> None:
         print("========== 話しかけてください。Ctrl+Cで終了します。 ==========")
