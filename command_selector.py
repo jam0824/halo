@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Pattern, Tuple
 
 from halo_mcp.mcp_call import MCPClient
 from halo_playwright.playwright_mixi2 import MixiClient
+from bluetooth.bluetooth_controll import CarController
 
 class CommandSelector:
     """
@@ -18,6 +19,7 @@ class CommandSelector:
 
     def __init__(self, config_path: str = "command.json") -> None:
         self.mixi_client = MixiClient(headless=True)
+        self.car_controller = CarController()
         self.config_path: str = config_path
         self.listRules: List[Tuple[str, Pattern[str]]] = []
         self._load_config()
@@ -62,6 +64,21 @@ class CommandSelector:
         elif key == "sns":
             self.mixi_client.run_once(command)
             response = "ハロ、投稿した。" + command
+        elif key == "forward":
+            self.car_controller.forward()
+            response = "ハロ、出る！"
+        elif key == "backward":
+            self.car_controller.backward()
+            response = "ハロ、戻る。"
+        elif key == "left":
+            self.car_controller.left()
+            response = "ハロ、左に行く"
+        elif key == "right":
+            self.car_controller.right()
+            response = "ハロ、右に行く"
+        elif key == "stop":
+            self.car_controller.stop()
+            response = "ハロ、止まる"
         return response
     
     def exec_command(self, command) -> Future:
