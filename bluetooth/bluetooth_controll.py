@@ -41,10 +41,10 @@ class CarController:
         await self._send(b"B#")
 
     async def left(self):
-        await self._send(b"C#")
+        await self._send(b"E#")
 
     async def right(self):
-        await self._send(b"D#")
+        await self._send(b"F#")
 
     async def stop(self):
         await self._send(b"0#")

@@ -10,6 +10,8 @@ from halo_mcp.mcp_call import MCPClient
 from halo_playwright.playwright_mixi2 import MixiClient
 from bluetooth.bluetooth_controll import CarController
 
+
+
 class CommandSelector:
     """
     - 初期化時に command.json を読み込む
@@ -17,21 +19,44 @@ class CommandSelector:
     - key に応じて処理を分岐するセレクター（現状は print のみ）
     """
 
-    def __init__(self, config_path: str = "command.json") -> None:
+    def __init__(self, config_path: str = "command.json", general_config: dict = {}) -> None:
         self.mixi_client = MixiClient(headless=True)
-        self.car_controller = CarController()
         self.config_path: str = config_path
+        self.general_config: dict = general_config
+        self.use_bluetooth: bool = self.general_config["bluetooth"]["use_bluetooth"]
+        self.bluetooth_address: str = self.general_config["bluetooth"]["bluetooth_address"]
+        self.bluetooth_char_uuid: str = self.general_config["bluetooth"]["bluetooth_char_uuid"]
         self.listRules: List[Tuple[str, Pattern[str]]] = []
         self._load_config()
         self.mcp_client = MCPClient()
+        self.car_controller = CarController(
+            self.bluetooth_address, 
+            self.bluetooth_char_uuid
+        )
         self._loop = None  # type: Optional[asyncio.AbstractEventLoop]
         self._loop_thread = None  # type: Optional[threading.Thread]
+        self._car_connected: bool = False
 
     def _ensure_loop(self) -> None:
+        if not self.use_bluetooth:
+            return
         if self._loop is None:
             self._loop = asyncio.new_event_loop()
             self._loop_thread = threading.Thread(target=self._loop.run_forever, daemon=True)
             self._loop_thread.start()
+
+    def _ensure_car_connected(self) -> None:
+        """BLE車両への接続を一度だけ張る。必要なら接続を確立する。"""
+        self._ensure_loop()
+        if not self._car_connected:
+            try:
+                fut = asyncio.run_coroutine_threadsafe(self.car_controller.connect(), self._loop)
+                # 接続完了を待機（環境に応じて調整可能）
+                fut.result(timeout=10)
+                self._car_connected = True
+            except Exception:
+                self._car_connected = False
+                raise
 
     def _load_config(self) -> None:
         path = Path(self.config_path)
@@ -65,19 +90,34 @@ class CommandSelector:
             self.mixi_client.run_once(command)
             response = "ハロ、投稿した。" + command
         elif key == "forward":
-            self.car_controller.forward()
+            if not self.use_bluetooth:
+                return None
+            self._ensure_car_connected()
+            asyncio.run_coroutine_threadsafe(self.car_controller.forward(), self._loop)
             response = "ハロ、出る！"
         elif key == "backward":
-            self.car_controller.backward()
+            if not self.use_bluetooth:
+                return None
+            self._ensure_car_connected()
+            asyncio.run_coroutine_threadsafe(self.car_controller.backward(), self._loop)
             response = "ハロ、戻る。"
         elif key == "left":
-            self.car_controller.left()
+            if not self.use_bluetooth:
+                return None
+            self._ensure_car_connected()
+            asyncio.run_coroutine_threadsafe(self.car_controller.left(), self._loop)
             response = "ハロ、左に行く"
         elif key == "right":
-            self.car_controller.right()
+            if not self.use_bluetooth:
+                return None
+            self._ensure_car_connected()
+            asyncio.run_coroutine_threadsafe(self.car_controller.right(), self._loop)
             response = "ハロ、右に行く"
         elif key == "stop":
-            self.car_controller.stop()
+            if not self.use_bluetooth:
+                return None
+            self._ensure_car_connected()
+            asyncio.run_coroutine_threadsafe(self.car_controller.stop(), self._loop)
             response = "ハロ、止まる"
         return response
     
