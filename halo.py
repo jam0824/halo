@@ -77,7 +77,7 @@ class Halo:
         self.tts = self.init_tts(self.tts_config)
         self.init_spotify()
 
-        self.tts_pipelined = VoiceVoxTTSPipelined(base_url=self.tts_config["base_url"], speaker=89, max_len=80)
+        self.tts_pipelined = VoiceVoxTTSPipelined(base_url=self.tts_config["base_url"], speaker=self.tts_config["speaker"], max_len=80)
         self.tts_pipelined.set_params(speedScale=1.0, pitchScale=0.0, intonationScale=1.0)
         self.tts_pipelined.start_stream(motor_controller=self.motor_controller, corr_gate=self.corr_gate, filler=self.filler, synth_workers=3, autoplay=False)
         
@@ -169,7 +169,7 @@ class Halo:
 
     # ---------- main loop ----------
     def main_loop(self) -> None:
-        self.speak_async("ハロ、起動した")
+        #self.speak_async("ハロ、起動した")
         self.run()
         time.sleep(1)
         self.speak_async("ハロ、待機モード")
@@ -206,16 +206,22 @@ class Halo:
                     self.stop_led()
 
                     # VADで発話を検出
+                    """
                     if not self.is_vad(
                         self.config, 
                         self.config["vad"]["min_consecutive_speech_frames"]):
                         time.sleep(0.1)
                         continue
+                    """
+                    
 
                     self.is_need_wav_filler = True  #wav再生のフィラーをリセットしておく
                     is_kaigyo = False  #改行が含まれているかどうか
 
                     # ユーザー発話認識(キーワード取得)
+                    if self.tts_pipelined.is_object_playing():
+                        time.sleep(0.1)
+                        continue
                     user_text = self.listen_with_nouns()
                     if not user_text or user_text == "":
                         time.sleep(0.1)

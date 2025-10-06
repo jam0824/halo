@@ -1,6 +1,6 @@
 {
   "owner_name": "まつ",
-  "your_name": "ハロ",
+  "your_name": "ロミィ",
   "stt": "azure",
   "llm": "gpt-4o-mini",
   "wakeup_word": ".*(ハロ|しゃべり|喋|話).*",
@@ -8,8 +8,8 @@
   "run_timeout_sec": 120,
   "stt_max_len": 50,
   "voiceVoxTTS": {
-    "base_url": "http://57.180.156.193",
-    "speaker": 89,
+    "base_url": "http://192.168.1.151:50021",
+    "speaker": 3,
     "max_len": 80,
     "queue_size": 4,
     "speedScale": 1.0,
@@ -17,7 +17,7 @@
     "intonationScale": 1.0
   },
   "filler":{
-    "use_filler": true,
+    "use_filler": false,
     "filler_dir": "./filler"
   },
   "led":{
@@ -30,7 +30,7 @@
     "use_motor": false
   },
   "bluetooth":{
-    "use_bluetooth": false,
+    "use_bluetooth": true,
     "bluetooth_address": "69:96:1C:04:00:58",
     "bluetooth_char_uuid": "0000ffe1-0000-1000-8000-00805f9b34fb"
   },
